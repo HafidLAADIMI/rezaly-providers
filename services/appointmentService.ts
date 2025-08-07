@@ -1,4 +1,4 @@
-  // services/appointmentService.ts
+// services/appointmentService.ts - FIXED VERSION WITH FIREBASE
 import { 
   doc, 
   getDoc, 
@@ -41,9 +41,25 @@ interface UpdateAppointmentData {
 class AppointmentService {
   private readonly collectionName = 'appointments';
 
-  // Create new appointment
+  // FIXED: Enhanced create appointment with slot validation
   async createAppointment(appointmentData: CreateAppointmentData): Promise<ServiceResponse<string>> {
     try {
+      console.log('Creating appointment with data:', appointmentData);
+
+      // Double-check slot availability before creating
+      const availableSlots = await this.getAvailableTimeSlots(
+        appointmentData.salonId, 
+        appointmentData.appointmentDate
+      );
+      
+      if (!availableSlots.includes(appointmentData.timeSlot)) {
+        console.error('Time slot not available:', appointmentData.timeSlot);
+        return { 
+          success: false, 
+          error: 'Ce créneau n\'est plus disponible' 
+        };
+      }
+
       const appointment = {
         ...appointmentData,
         status: 'pending' as AppointmentStatus,
@@ -52,6 +68,8 @@ class AppointmentService {
       };
 
       const docRef = await addDoc(collection(db, this.collectionName), appointment);
+      console.log('Appointment created successfully:', docRef.id);
+      
       return { success: true, data: docRef.id };
     } catch (error: any) {
       console.error('Error creating appointment:', error);
@@ -198,24 +216,51 @@ class AppointmentService {
     }
   }
 
-  // Get available time slots for a salon on a specific date
+  // FIXED: Enhanced getAvailableTimeSlots with better error handling
   async getAvailableTimeSlots(salonId: string, date: string): Promise<string[]> {
     try {
+      console.log('Getting available time slots for:', { salonId, date });
+
+      // Validate inputs
+      if (!salonId || !date) {
+        console.error('Missing salonId or date');
+        return [];
+      }
+
+      // Validate date format
+      const dateObj = new Date(date + 'T00:00:00');
+      if (isNaN(dateObj.getTime())) {
+        console.error('Invalid date format:', date);
+        return [];
+      }
+
       // Get salon info to check operating hours
       const salonRef = doc(db, 'salons', salonId);
       const salonSnap = await getDoc(salonRef);
       
       if (!salonSnap.exists()) {
-        throw new Error('Salon not found');
+        console.error('Salon not found:', salonId);
+        return [];
       }
 
       const salon = salonSnap.data();
-      const dayOfWeek = new Date(date).toLocaleDateString('en-US', { weekday: 'lowercase' });
+      console.log('Salon data loaded:', salon.name);
+
+      // FIXED: Get correct day of week
+      const selectedDay = new Date(date + 'T00:00:00');
+      const days = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const dayOfWeek = days[selectedDay.getDay()];
+      
+      console.log('Day of week:', dayOfWeek);
+
       const operatingHours = salon.operatingHours?.[dayOfWeek];
 
       if (!operatingHours || operatingHours.isClosed) {
+        console.log('Salon is closed on', dayOfWeek);
         return [];
       }
+
+      console.log('Operating hours:', operatingHours);
 
       // Get existing appointments for the date
       const q = query(
@@ -232,6 +277,8 @@ class AppointmentService {
         bookedSlots.push(appointment.timeSlot);
       });
 
+      console.log('Booked slots:', bookedSlots);
+
       // Generate available time slots
       const availableSlots = this.generateTimeSlots(
         operatingHours.open,
@@ -239,40 +286,89 @@ class AppointmentService {
         bookedSlots
       );
 
+      console.log('Available slots:', availableSlots);
       return availableSlots;
+
     } catch (error) {
       console.error('Error getting available time slots:', error);
       return [];
     }
   }
 
-  // Generate time slots between open and close hours
-  private generateTimeSlots(openTime: string, closeTime: string, bookedSlots: string[] = [], interval: number = 30): string[] {
-    const slots: string[] = [];
-    const start = this.timeToMinutes(openTime);
-    const end = this.timeToMinutes(closeTime);
-
-    for (let time = start; time < end; time += interval) {
-      const timeSlot = this.minutesToTime(time);
-      if (!bookedSlots.includes(timeSlot)) {
-        slots.push(timeSlot);
+  // FIXED: Enhanced generateTimeSlots with better validation
+  private generateTimeSlots(
+    openTime: string, 
+    closeTime: string, 
+    bookedSlots: string[] = [], 
+    interval: number = 30
+  ): string[] {
+    try {
+      if (!openTime || !closeTime) {
+        console.error('Missing open or close time');
+        return [];
       }
-    }
 
-    return slots;
+      const slots: string[] = [];
+      const start = this.timeToMinutes(openTime);
+      const end = this.timeToMinutes(closeTime);
+
+      if (start >= end) {
+        console.error('Invalid time range:', { openTime, closeTime });
+        return [];
+      }
+
+      for (let time = start; time < end; time += interval) {
+        const timeSlot = this.minutesToTime(time);
+        if (!bookedSlots.includes(timeSlot)) {
+          slots.push(timeSlot);
+        }
+      }
+
+      console.log(`Generated ${slots.length} time slots between ${openTime} and ${closeTime}`);
+      return slots;
+    } catch (error) {
+      console.error('Error generating time slots:', error);
+      return [];
+    }
   }
 
-  // Helper function to convert time string to minutes
+  // FIXED: Enhanced helper function with validation
   private timeToMinutes(timeStr: string): number {
-    const [hours, minutes] = timeStr.split(':').map(Number);
-    return hours * 60 + minutes;
+    try {
+      if (!timeStr || !timeStr.includes(':')) {
+        console.error('Invalid time format:', timeStr);
+        return 0;
+      }
+
+      const [hours, minutes] = timeStr.split(':').map(Number);
+      
+      if (isNaN(hours) || isNaN(minutes)) {
+        console.error('Invalid time values:', timeStr);
+        return 0;
+      }
+
+      return hours * 60 + minutes;
+    } catch (error) {
+      console.error('Error converting time to minutes:', error);
+      return 0;
+    }
   }
 
   // Helper function to convert minutes to time string
   private minutesToTime(minutes: number): string {
-    const hours = Math.floor(minutes / 60);
-    const mins = minutes % 60;
-    return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+    try {
+      if (isNaN(minutes) || minutes < 0) {
+        console.error('Invalid minutes value:', minutes);
+        return '00:00';
+      }
+
+      const hours = Math.floor(minutes / 60);
+      const mins = minutes % 60;
+      return `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+    } catch (error) {
+      console.error('Error converting minutes to time:', error);
+      return '00:00';
+    }
   }
 
   // Get appointment history for client
@@ -294,6 +390,28 @@ class AppointmentService {
       return history;
     } catch (error) {
       console.error('Error getting appointment history:', error);
+      return [];
+    }
+  }
+
+  // ADDED: Get appointments by date for debugging
+  async getAppointmentsByDate(salonId: string, date: string): Promise<Appointment[]> {
+    try {
+      const q = query(
+        collection(db, this.collectionName),
+        where('salonId', '==', salonId),
+        where('appointmentDate', '==', date)
+      );
+
+      const querySnapshot = await getDocs(q);
+      const appointments: Appointment[] = [];
+      querySnapshot.forEach((doc) => {
+        appointments.push({ id: doc.id, ...doc.data() } as Appointment);
+      });
+
+      return appointments;
+    } catch (error) {
+      console.error('Error getting appointments by date:', error);
       return [];
     }
   }

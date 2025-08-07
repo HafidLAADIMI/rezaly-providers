@@ -1,23 +1,25 @@
-
-// app/(tabs)/salon.tsx
+// app/(tabs)/salon.tsx - FIXED PROVIDER VERSION
 import { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, Modal } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, Modal, RefreshControl } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useAuth } from '../../contexts/AuthContext';
 import { salonOwnerService } from '../../services/salonOwnerService';
 import { serviceService } from '../../services/serviceService';
 import { categoryService } from '../../services/categoryService';
-import { Service, Category } from '../../types';
+import { appointmentService } from '../../services/appointmentService';
+import { Service, Category, Appointment } from '../../types';
 import { router } from 'expo-router';
 
 export default function SalonManagementScreen() {
   const { user } = useAuth();
   const [services, setServices] = useState<Service[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [showAddServiceModal, setShowAddServiceModal] = useState(false);
   const [editingService, setEditingService] = useState<Service | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [hasSalon, setHasSalon] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   // Form state
   const [serviceForm, setServiceForm] = useState({
@@ -32,11 +34,14 @@ export default function SalonManagementScreen() {
     loadData();
   }, []);
 
+  // FIXED: Enhanced data loading with better error handling
   const loadData = async () => {
     console.log('SalonScreen: Loading data for user:', user?.email);
     console.log('SalonScreen: User salonId:', user?.salonId);
     
     try {
+      setIsLoading(true);
+      
       // Load categories first (always available)
       const categoriesList = await categoryService.getAllCategories();
       setCategories(categoriesList);
@@ -44,24 +49,51 @@ export default function SalonManagementScreen() {
 
       // Check if user has a salon
       if (user?.salonId) {
-        console.log('SalonScreen: User has salonId, loading services...');
+        console.log('SalonScreen: User has salonId, loading salon data...');
         setHasSalon(true);
         
-        // Load services for this salon
-        const servicesList = await serviceService.getServicesBySalon(user.salonId);
-        setServices(servicesList);
-        console.log('SalonScreen: Services loaded:', servicesList.length);
+        // Load services and appointments in parallel
+        const [servicesList, appointmentsList] = await Promise.allSettled([
+          serviceService.getServicesBySalon(user.salonId),
+          appointmentService.getSalonAppointments(user.salonId)
+        ]);
+
+        // Handle services
+        if (servicesList.status === 'fulfilled') {
+          setServices(servicesList.value);
+          console.log('SalonScreen: Services loaded:', servicesList.value.length);
+        } else {
+          console.error('Failed to load services:', servicesList.reason);
+          setServices([]);
+        }
+
+        // Handle appointments
+        if (appointmentsList.status === 'fulfilled') {
+          setAppointments(appointmentsList.value);
+          console.log('SalonScreen: Appointments loaded:', appointmentsList.value.length);
+        } else {
+          console.error('Failed to load appointments:', appointmentsList.reason);
+          setAppointments([]);
+        }
       } else {
         console.log('SalonScreen: User has no salonId, showing create salon flow');
         setHasSalon(false);
         setServices([]);
+        setAppointments([]);
       }
     } catch (error) {
       console.error('SalonScreen: Error loading data:', error);
       Alert.alert('Erreur', 'Impossible de charger les données');
     } finally {
       setIsLoading(false);
+      setRefreshing(false);
     }
+  };
+
+  // FIXED: Enhanced refresh function
+  const onRefresh = async () => {
+    setRefreshing(true);
+    await loadData();
   };
 
   const resetForm = () => {
@@ -75,6 +107,7 @@ export default function SalonManagementScreen() {
     setEditingService(null);
   };
 
+  // FIXED: Enhanced service creation with validation
   const handleAddService = async () => {
     if (!user?.salonId) {
       Alert.alert('Erreur', 'Vous devez d\'abord créer votre salon');
@@ -88,12 +121,25 @@ export default function SalonManagementScreen() {
       return;
     }
 
+    const priceNum = parseFloat(price);
+    const durationNum = parseInt(duration);
+
+    if (isNaN(priceNum) || priceNum <= 0) {
+      Alert.alert('Erreur', 'Le prix doit être un nombre positif');
+      return;
+    }
+
+    if (isNaN(durationNum) || durationNum <= 0) {
+      Alert.alert('Erreur', 'La durée doit être un nombre positif en minutes');
+      return;
+    }
+
     try {
       const result = await salonOwnerService.addService(user.salonId, {
         name: name.trim(),
         description: description.trim(),
-        price: parseFloat(price),
-        duration: parseInt(duration),
+        price: priceNum,
+        duration: durationNum,
         categoryId
       });
 
@@ -101,9 +147,9 @@ export default function SalonManagementScreen() {
         Alert.alert('Succès', 'Service ajouté avec succès');
         setShowAddServiceModal(false);
         resetForm();
-        loadData();
+        await loadData(); // Reload data to show new service
       } else {
-        Alert.alert('Erreur', result.error);
+        Alert.alert('Erreur', result.error || 'Impossible d\'ajouter le service');
       }
     } catch (error) {
       console.error('Error adding service:', error);
@@ -121,12 +167,25 @@ export default function SalonManagementScreen() {
       return;
     }
 
+    const priceNum = parseFloat(price);
+    const durationNum = parseInt(duration);
+
+    if (isNaN(priceNum) || priceNum <= 0) {
+      Alert.alert('Erreur', 'Le prix doit être un nombre positif');
+      return;
+    }
+
+    if (isNaN(durationNum) || durationNum <= 0) {
+      Alert.alert('Erreur', 'La durée doit être un nombre positif en minutes');
+      return;
+    }
+
     try {
       const result = await salonOwnerService.updateService(editingService.id, {
         name: name.trim(),
         description: description.trim(),
-        price: parseFloat(price),
-        duration: parseInt(duration),
+        price: priceNum,
+        duration: durationNum,
         categoryId
       });
 
@@ -134,9 +193,9 @@ export default function SalonManagementScreen() {
         Alert.alert('Succès', 'Service modifié avec succès');
         setShowAddServiceModal(false);
         resetForm();
-        loadData();
+        await loadData(); // Reload data to show updated service
       } else {
-        Alert.alert('Erreur', result.error);
+        Alert.alert('Erreur', result.error || 'Impossible de modifier le service');
       }
     } catch (error) {
       console.error('Error updating service:', error);
@@ -147,7 +206,7 @@ export default function SalonManagementScreen() {
   const handleDeleteService = (service: Service) => {
     Alert.alert(
       'Supprimer le service',
-      `Êtes-vous sûr de vouloir supprimer "${service.name}" ?`,
+      `Êtes-vous sûr de vouloir supprimer "${service.name}" ?\n\nCette action supprimera également tous les rendez-vous associés à ce service.`,
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -157,10 +216,10 @@ export default function SalonManagementScreen() {
             try {
               const result = await salonOwnerService.deleteService(service.id);
               if (result.success) {
-                Alert.alert('Succès', 'Service supprimé');
-                loadData();
+                Alert.alert('Succès', 'Service supprimé avec succès');
+                await loadData(); // Reload data
               } else {
-                Alert.alert('Erreur', result.error);
+                Alert.alert('Erreur', result.error || 'Impossible de supprimer le service');
               }
             } catch (error) {
               console.error('Error deleting service:', error);
@@ -191,6 +250,17 @@ export default function SalonManagementScreen() {
   const getCategoryName = (categoryId: string) => {
     const category = categories.find(cat => cat.id === categoryId);
     return category?.name || 'Catégorie inconnue';
+  };
+
+  // FIXED: Get pending appointments count
+  const getPendingAppointmentsCount = () => {
+    return appointments.filter(apt => apt.status === 'pending').length;
+  };
+
+  // FIXED: Get today's appointments count
+  const getTodayAppointmentsCount = () => {
+    const today = new Date().toISOString().split('T')[0];
+    return appointments.filter(apt => apt.appointmentDate === today).length;
   };
 
   if (isLoading) {
@@ -224,9 +294,7 @@ export default function SalonManagementScreen() {
               
               <TouchableOpacity 
                 className="bg-primary-beige rounded-xl px-6 py-3 mb-4"
-                onPress={() => {
-                     router.push("/create-salon")
-                }}
+                onPress={() => router.push("/create-salon")}
               >
                 <Text className="text-primary-dark font-semibold">Créer ma fiche salon</Text>
               </TouchableOpacity>
@@ -240,10 +308,12 @@ export default function SalonManagementScreen() {
   // Normal salon management interface
   return (
     <View className="flex-1 bg-primary-dark">
-      <ScrollView>
+      <ScrollView refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#D4B896" />
+      }>
         {/* Header */}
         <View className="px-6 pt-16 pb-6">
-          <View className="flex-row justify-between items-center mb-4">
+          <View className="flex-row justify-between items-center mb-6">
             <Text className="text-3xl font-bold text-text-primary">Mon Salon</Text>
             <TouchableOpacity
               onPress={() => setShowAddServiceModal(true)}
@@ -252,6 +322,22 @@ export default function SalonManagementScreen() {
               <MaterialIcons name="add" size={20} color="#2A2A2A" />
               <Text className="text-primary-dark font-semibold ml-1">Service</Text>
             </TouchableOpacity>
+          </View>
+
+          {/* ADDED: Stats Cards */}
+          <View className="flex-row gap-3 mb-6">
+            <View className="flex-1 bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4">
+              <Text className="text-text-primary text-2xl font-bold">{services.length}</Text>
+              <Text className="text-text-primary/70 text-sm">Services</Text>
+            </View>
+            <View className="flex-1 bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4">
+              <Text className="text-primary-beige text-2xl font-bold">{getPendingAppointmentsCount()}</Text>
+              <Text className="text-text-primary/70 text-sm">En attente</Text>
+            </View>
+            <View className="flex-1 bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4">
+              <Text className="text-text-primary text-2xl font-bold">{getTodayAppointmentsCount()}</Text>
+              <Text className="text-text-primary/70 text-sm">Aujourd'hui</Text>
+            </View>
           </View>
         </View>
 
@@ -268,7 +354,7 @@ export default function SalonManagementScreen() {
                 Aucun service ajouté
               </Text>
               <Text className="text-text-primary/70 text-center mt-1 mb-4">
-                Commencez par ajouter vos premiers services
+                Commencez par ajouter vos premiers services pour que les clients puissent réserver
               </Text>
               <TouchableOpacity
                 onPress={() => setShowAddServiceModal(true)}
@@ -309,7 +395,7 @@ export default function SalonManagementScreen() {
                     </View>
                   </View>
 
-                  <Text className="text-text-primary/70 mb-3">
+                  <Text className="text-text-primary/70 mb-3 text-sm">
                     {service.description}
                   </Text>
 
@@ -317,7 +403,7 @@ export default function SalonManagementScreen() {
                     <View className="flex-row items-center">
                       <MaterialIcons name="attach-money" size={16} color="#D4B896" />
                       <Text className="text-text-primary ml-1 font-semibold">
-                        {service.price}€
+                        {service.price} DH
                       </Text>
                     </View>
                     <View className="flex-row items-center">
@@ -332,6 +418,59 @@ export default function SalonManagementScreen() {
             </View>
           )}
         </View>
+
+        {/* Recent Appointments Section */}
+        {appointments.length > 0 && (
+          <View className="px-6 mt-8">
+            <View className="flex-row justify-between items-center mb-4">
+              <Text className="text-xl font-semibold text-text-primary">
+                Rendez-vous récents
+              </Text>
+              <TouchableOpacity onPress={() => router.push('/(tabs)/appointments')}>
+                <Text className="text-primary-beige font-medium">Voir tout</Text>
+              </TouchableOpacity>
+            </View>
+
+            {appointments.slice(0, 3).map((appointment) => (
+              <View
+                key={appointment.id}
+                className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 mb-3"
+              >
+                <View className="flex-row justify-between items-start">
+                  <View className="flex-1">
+                    <Text className="text-text-primary font-semibold">
+                      {appointment.clientName}
+                    </Text>
+                    <Text className="text-text-primary/70 text-sm">
+                      {appointment.appointmentDate} à {appointment.timeSlot}
+                    </Text>
+                    <Text className="text-primary-beige font-medium mt-1">
+                      {appointment.totalPrice} DH
+                    </Text>
+                  </View>
+                  <View className={`px-2 py-1 rounded-full ${
+                    appointment.status === 'pending' ? 'bg-amber-500/20' :
+                    appointment.status === 'confirmed' ? 'bg-green-500/20' :
+                    appointment.status === 'completed' ? 'bg-blue-500/20' :
+                    'bg-red-500/20'
+                  }`}>
+                    <Text className={`text-xs font-medium ${
+                      appointment.status === 'pending' ? 'text-amber-500' :
+                      appointment.status === 'confirmed' ? 'text-green-500' :
+                      appointment.status === 'completed' ? 'text-blue-500' :
+                      'text-red-500'
+                    }`}>
+                      {appointment.status === 'pending' ? 'En attente' :
+                       appointment.status === 'confirmed' ? 'Confirmé' :
+                       appointment.status === 'completed' ? 'Terminé' :
+                       appointment.status === 'cancelled' ? 'Annulé' : 'Refusé'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Bottom Padding */}
         <View className="h-20" />
@@ -363,7 +502,7 @@ export default function SalonManagementScreen() {
               <View className="space-y-4">
                 {/* Service Name */}
                 <View>
-                  <Text className="text-text-primary mb-2 font-medium">Nom du service</Text>
+                  <Text className="text-text-primary mb-2 font-medium">Nom du service *</Text>
                   <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
                     <TextInput
                       className="text-text-primary"
@@ -377,7 +516,7 @@ export default function SalonManagementScreen() {
 
                 {/* Description */}
                 <View>
-                  <Text className="text-text-primary mb-2 font-medium">Description</Text>
+                  <Text className="text-text-primary mb-2 font-medium">Description *</Text>
                   <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
                     <TextInput
                       className="text-text-primary"
@@ -394,7 +533,7 @@ export default function SalonManagementScreen() {
 
                 {/* Category */}
                 <View>
-                  <Text className="text-text-primary mb-2 font-medium">Catégorie</Text>
+                  <Text className="text-text-primary mb-2 font-medium">Catégorie *</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View className="flex-row gap-2">
                       {categories.map((category) => (
@@ -423,11 +562,11 @@ export default function SalonManagementScreen() {
                 {/* Price and Duration */}
                 <View className="flex-row gap-4">
                   <View className="flex-1">
-                    <Text className="text-text-primary mb-2 font-medium">Prix (€)</Text>
+                    <Text className="text-text-primary mb-2 font-medium">Prix (DH) *</Text>
                     <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
                       <TextInput
                         className="text-text-primary"
-                        placeholder="25"
+                        placeholder="150"
                         placeholderTextColor="rgba(245, 245, 245, 0.6)"
                         value={serviceForm.price}
                         onChangeText={(value) => updateServiceForm('price', value)}
@@ -437,7 +576,7 @@ export default function SalonManagementScreen() {
                   </View>
 
                   <View className="flex-1">
-                    <Text className="text-text-primary mb-2 font-medium">Durée (min)</Text>
+                    <Text className="text-text-primary mb-2 font-medium">Durée (min) *</Text>
                     <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
                       <TextInput
                         className="text-text-primary"

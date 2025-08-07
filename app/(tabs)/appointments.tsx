@@ -1,453 +1,524 @@
-// app/(tabs)/appointments.tsx
-import { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, RefreshControl, Alert } from 'react-native';
+// app/(tabs)/appointments.tsx - PROVIDER VERSION
+import { useState, useEffect, useCallback } from 'react';
+import { 
+  View, 
+  Text, 
+  ScrollView, 
+  TouchableOpacity, 
+  Alert, 
+  RefreshControl,
+  FlatList,
+  ActivityIndicator,
+  TextInput,
+  Modal
+} from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import { Calendar } from 'react-native-calendars';
 import { useAuth } from '../../contexts/AuthContext';
 import { appointmentService } from '../../services/appointmentService';
-import { notificationService } from '../../services/notificationService';
-import { Appointment, AppointmentStatus } from '../../types';
+import { serviceService } from '../../services/serviceService';
+import { Appointment, AppointmentStatus, Service } from '../../types';
 
-export default function AppointmentsScreen() {
+interface AppointmentWithServices extends Appointment {
+  serviceDetails?: Service[];
+}
+
+export default function ProviderAppointmentsScreen() {
   const { user } = useAuth();
-  const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
-  const [filterStatus, setFilterStatus] = useState<'all' | AppointmentStatus>('all');
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [appointments, setAppointments] = useState<AppointmentWithServices[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showCalendar, setShowCalendar] = useState(false);
-
-  const isSalonOwner = user?.role === 'salon_owner';
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'pending' | 'confirmed' | 'history'>('pending');
+  const [showNoteModal, setShowNoteModal] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [noteText, setNoteText] = useState('');
 
   useEffect(() => {
-    loadAppointments();
-  }, [filterStatus]);
+    if (user?.salonId) {
+      loadAppointments();
+    }
+  }, [user?.salonId]);
 
-  const loadAppointments = async () => {
-    if (!user) return;
+  // FIXED: Enhanced appointment loading with service details
+  const loadAppointments = useCallback(async (isRefreshing = false) => {
+    if (!user?.salonId) {
+      console.log('No salon ID available');
+      return;
+    }
 
     try {
-      let appointmentsList: Appointment[];
-      
-      if (isSalonOwner && user.salonId) {
-        // Load salon appointments for salon owners
-        if (filterStatus === 'all') {
-          appointmentsList = await appointmentService.getSalonAppointments(user.salonId);
-        } else {
-          appointmentsList = await appointmentService.getSalonAppointments(user.salonId, filterStatus);
-        }
-      } else if (isSalonOwner && !user.salonId) {
-        // Salon owner without salon
-        appointmentsList = [];
-      } else {
-        // Load client appointments for regular users
-        appointmentsList = await appointmentService.getClientAppointments(user.id);
-        if (filterStatus !== 'all') {
-          appointmentsList = appointmentsList.filter(apt => apt.status === filterStatus);
-        }
+      if (!isRefreshing) {
+        setIsLoading(true);
       }
 
-      setAppointments(appointmentsList);
-      console.log('Appointments loaded:', appointmentsList.length);
+      console.log('Loading appointments for salon:', user.salonId);
+
+      const appointmentsData = await appointmentService.getSalonAppointments(user.salonId);
+      console.log('Loaded appointments:', appointmentsData.length);
+
+      // Load service details for each appointment
+      const appointmentsWithServices = await Promise.allSettled(
+        appointmentsData.map(async (appointment) => {
+          try {
+            if (!appointment.services || appointment.services.length === 0) {
+              return { ...appointment, serviceDetails: [] };
+            }
+
+            const services = await serviceService.getServicesByIds(appointment.services);
+            return { ...appointment, serviceDetails: services };
+          } catch (error) {
+            console.error('Error loading services for appointment:', appointment.id, error);
+            return { ...appointment, serviceDetails: [] };
+          }
+        })
+      );
+
+      // Filter successful results
+      const successfulAppointments = appointmentsWithServices
+        .filter((result): result is PromiseFulfilledResult<AppointmentWithServices> => 
+          result.status === 'fulfilled'
+        )
+        .map(result => result.value);
+
+      // Sort by date and time
+      const sortedAppointments = successfulAppointments.sort((a, b) => {
+        const dateA = new Date(a.appointmentDate + 'T' + a.timeSlot);
+        const dateB = new Date(b.appointmentDate + 'T' + b.timeSlot);
+        return dateA.getTime() - dateB.getTime();
+      });
+
+      setAppointments(sortedAppointments);
+      console.log('Appointments processed successfully');
+
     } catch (error) {
       console.error('Error loading appointments:', error);
       Alert.alert('Erreur', 'Impossible de charger les rendez-vous');
     } finally {
-      setIsLoading(false);
+      if (!isRefreshing) {
+        setIsLoading(false);
+      }
     }
-  };
+  }, [user?.salonId]);
 
   const onRefresh = async () => {
-    setIsRefreshing(true);
-    await loadAppointments();
-    setIsRefreshing(false);
+    setRefreshing(true);
+    await loadAppointments(true);
+    setRefreshing(false);
   };
 
-  const handleStatusUpdate = async (appointmentId: string, status: AppointmentStatus, reason?: string) => {
-    try {
-      let result;
-      
-      switch (status) {
-        case 'confirmed':
-          result = await appointmentService.confirmAppointment(appointmentId);
-          if (result.success) {
-            const appointment = appointments.find(apt => apt.id === appointmentId);
-            if (appointment) {
-              await notificationService.notifyAppointmentConfirmed(appointment.clientId, appointment);
-            }
-          }
-          break;
-        case 'rejected':
-          result = await appointmentService.rejectAppointment(appointmentId, reason || 'Non spécifié');
-          if (result.success) {
-            const appointment = appointments.find(apt => apt.id === appointmentId);
-            if (appointment) {
-              await notificationService.notifyAppointmentRejected(appointment.clientId, appointment);
-            }
-          }
-          break;
-        case 'cancelled':
-          result = await appointmentService.cancelAppointment(appointmentId, reason || 'Annulé par le client');
-          break;
-        default:
-          result = await appointmentService.updateAppointmentStatus(appointmentId, status);
-      }
-
-      if (result.success) {
-        await loadAppointments();
-        Alert.alert('Succès', 'Statut du rendez-vous mis à jour');
-      } else {
-        Alert.alert('Erreur', result.error);
-      }
-    } catch (error) {
-      console.error('Error updating appointment status:', error);
-      Alert.alert('Erreur', 'Impossible de mettre à jour le rendez-vous');
-    }
-  };
-
-  const showStatusActions = (appointment: Appointment) => {
-    if (!isSalonOwner) return;
-    
-    const actions = [];
-    
-    if (appointment.status === 'pending') {
-      actions.push(
+  // FIXED: Enhanced appointment status update
+  const handleConfirmAppointment = (appointment: Appointment) => {
+    Alert.alert(
+      'Confirmer le rendez-vous',
+      `Confirmer le rendez-vous de ${appointment.clientName} pour le ${appointment.appointmentDate} à ${appointment.timeSlot} ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
         { 
           text: 'Confirmer', 
-          onPress: () => handleStatusUpdate(appointment.id, 'confirmed'),
-          style: 'default'
-        },
-        { 
-          text: 'Refuser', 
-          onPress: () => {
-            Alert.alert(
-              'Motif du refus',
-              'Pourquoi refusez-vous ce rendez-vous ?',
-              [
-                { text: 'Créneaux non disponible', onPress: () => handleStatusUpdate(appointment.id, 'rejected', 'Créneaux non disponible') },
-                { text: 'Service non proposé', onPress: () => handleStatusUpdate(appointment.id, 'rejected', 'Service non proposé') },
-                { text: 'Salon fermé', onPress: () => handleStatusUpdate(appointment.id, 'rejected', 'Salon fermé') },
-                { text: 'Autre raison', onPress: () => handleStatusUpdate(appointment.id, 'rejected', 'Autre raison') },
-                { text: 'Annuler', style: 'cancel' }
-              ]
-            );
-          },
-          style: 'destructive'
+          onPress: () => confirmAppointment(appointment.id)
         }
-      );
+      ]
+    );
+  };
+
+  const confirmAppointment = async (appointmentId: string) => {
+    try {
+      const result = await appointmentService.confirmAppointment(appointmentId, '');
+      
+      if (result.success) {
+        Alert.alert('Succès', 'Rendez-vous confirmé avec succès');
+        await loadAppointments();
+      } else {
+        Alert.alert('Erreur', result.error || 'Impossible de confirmer le rendez-vous');
+      }
+    } catch (error) {
+      console.error('Error confirming appointment:', error);
+      Alert.alert('Erreur', 'Une erreur est survenue');
     }
-    
-    if (appointment.status === 'confirmed') {
-      actions.push(
+  };
+
+  const handleRejectAppointment = (appointment: Appointment) => {
+    setSelectedAppointment(appointment);
+    setNoteText('');
+    setShowNoteModal(true);
+  };
+
+  const rejectAppointment = async () => {
+    if (!selectedAppointment) return;
+
+    if (!noteText.trim()) {
+      Alert.alert('Erreur', 'Veuillez indiquer une raison pour le refus');
+      return;
+    }
+
+    try {
+      const result = await appointmentService.rejectAppointment(
+        selectedAppointment.id, 
+        noteText.trim()
+      );
+      
+      if (result.success) {
+        Alert.alert('Rendez-vous refusé', 'Le client sera notifié du refus');
+        setShowNoteModal(false);
+        setSelectedAppointment(null);
+        setNoteText('');
+        await loadAppointments();
+      } else {
+        Alert.alert('Erreur', result.error || 'Impossible de refuser le rendez-vous');
+      }
+    } catch (error) {
+      console.error('Error rejecting appointment:', error);
+      Alert.alert('Erreur', 'Une erreur est survenue');
+    }
+  };
+
+  const handleCompleteAppointment = (appointment: Appointment) => {
+    Alert.alert(
+      'Marquer comme terminé',
+      `Marquer le rendez-vous de ${appointment.clientName} comme terminé ?`,
+      [
+        { text: 'Annuler', style: 'cancel' },
         { 
-          text: 'Marquer terminé', 
-          onPress: () => handleStatusUpdate(appointment.id, 'completed'),
-          style: 'default'
+          text: 'Terminer', 
+          onPress: () => completeAppointment(appointment.id)
         }
-      );
-    }
-
-    actions.push({ text: 'Annuler', style: 'cancel' });
-
-    Alert.alert('Actions sur le rendez-vous', 'Que souhaitez-vous faire ?', actions);
+      ]
+    );
   };
 
-  const getStatusColor = (status: AppointmentStatus) => {
-    switch (status) {
-      case 'pending': return 'bg-yellow-500/20 text-yellow-600';
-      case 'confirmed': return 'bg-green-500/20 text-green-600';
-      case 'completed': return 'bg-blue-500/20 text-blue-600';
-      case 'rejected': return 'bg-red-500/20 text-red-600';
-      case 'cancelled': return 'bg-gray-500/20 text-gray-600';
-    }
-  };
-
-  const getStatusText = (status: AppointmentStatus) => {
-    switch (status) {
-      case 'pending': return 'En attente';
-      case 'confirmed': return 'Confirmé';
-      case 'completed': return 'Terminé';
-      case 'rejected': return 'Refusé';
-      case 'cancelled': return 'Annulé';
+  const completeAppointment = async (appointmentId: string) => {
+    try {
+      const result = await appointmentService.updateAppointmentStatus(appointmentId, 'completed');
+      
+      if (result.success) {
+        Alert.alert('Succès', 'Rendez-vous marqué comme terminé');
+        await loadAppointments();
+      } else {
+        Alert.alert('Erreur', result.error || 'Impossible de terminer le rendez-vous');
+      }
+    } catch (error) {
+      console.error('Error completing appointment:', error);
+      Alert.alert('Erreur', 'Une erreur est survenue');
     }
   };
 
+  // FIXED: Enhanced date formatting
   const formatDate = (dateString: string) => {
-    return new Date(dateString).toLocaleDateString('fr-FR', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-  };
-
-  const getMarkedDates = () => {
-    const marked: any = {};
-    appointments.forEach(appointment => {
-      marked[appointment.appointmentDate] = {
-        marked: true,
-        dotColor: appointment.status === 'confirmed' ? '#10B981' : '#D4B896'
-      };
-    });
-    return marked;
-  };
-
-  const filteredAppointments = appointments.filter(appointment => {
-    if (showCalendar && selectedDate) {
-      return appointment.appointmentDate === selectedDate;
+    try {
+      const date = new Date(dateString + 'T00:00:00');
+      if (isNaN(date.getTime())) {
+        return 'Date invalide';
+      }
+      return date.toLocaleDateString('fr-FR', {
+        weekday: 'short',
+        day: 'numeric', 
+        month: 'short'
+      });
+    } catch (error) {
+      return 'Date invalide';
     }
-    return true;
+  };
+
+  // Filter appointments based on active tab
+  const filteredAppointments = appointments.filter(apt => {
+    const today = new Date().toISOString().split('T')[0];
+    const aptDate = apt.appointmentDate;
+
+    switch (activeTab) {
+      case 'pending':
+        return apt.status === 'pending';
+      case 'confirmed':
+        return apt.status === 'confirmed';
+      case 'history':
+        return apt.status === 'completed' || apt.status === 'cancelled' || apt.status === 'rejected';
+      default:
+        return false;
+    }
   });
+
+  const getTabCount = (tab: string) => {
+    return appointments.filter(apt => {
+      switch (tab) {
+        case 'pending': return apt.status === 'pending';
+        case 'confirmed': return apt.status === 'confirmed';
+        case 'history': return ['completed', 'cancelled', 'rejected'].includes(apt.status);
+        default: return false;
+      }
+    }).length;
+  };
+
+  const renderAppointmentCard = ({ item: appointment }: { item: AppointmentWithServices }) => {
+    const getStatusColor = () => {
+      switch (appointment.status) {
+        case 'pending': return 'bg-amber-500/20 text-amber-600';
+        case 'confirmed': return 'bg-green-500/20 text-green-600';
+        case 'completed': return 'bg-blue-500/20 text-blue-600';
+        case 'cancelled': return 'bg-red-500/20 text-red-600';
+        case 'rejected': return 'bg-red-500/20 text-red-600';
+        default: return 'bg-gray-500/20 text-gray-600';
+      }
+    };
+
+    return (
+      <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 mb-4">
+        <View className="flex-row justify-between items-start mb-3">
+          <View className="flex-1">
+            <Text className="text-text-primary font-semibold text-lg">
+              {appointment.clientName}
+            </Text>
+            <Text className="text-text-primary/70 text-sm">
+              {appointment.clientPhone}
+            </Text>
+          </View>
+          <View className={`px-2 py-1 rounded-full ${getStatusColor()}`}>
+            <Text className="text-xs font-medium">
+              {appointment.status === 'pending' ? 'En attente' :
+               appointment.status === 'confirmed' ? 'Confirmé' :
+               appointment.status === 'completed' ? 'Terminé' :
+               appointment.status === 'cancelled' ? 'Annulé' : 'Refusé'}
+            </Text>
+          </View>
+        </View>
+
+        <View className="flex-row items-center mb-2">
+          <MaterialIcons name="schedule" size={16} color="#D4B896" />
+          <Text className="text-text-primary ml-2">
+            {formatDate(appointment.appointmentDate)} à {appointment.timeSlot}
+          </Text>
+        </View>
+
+        <View className="flex-row items-center mb-3">
+          <MaterialIcons name="attach-money" size={16} color="#D4B896" />
+          <Text className="text-text-primary ml-2 font-medium">
+            {appointment.totalPrice} DH ({appointment.totalDuration} min)
+          </Text>
+        </View>
+
+        {appointment.serviceDetails && appointment.serviceDetails.length > 0 && (
+          <View className="mb-3">
+            <Text className="text-text-primary/70 text-sm mb-1">Services:</Text>
+            {appointment.serviceDetails.map((service) => (
+              <Text key={service.id} className="text-text-primary text-sm">
+                • {service.name}
+              </Text>
+            ))}
+          </View>
+        )}
+
+        {appointment.notes && (
+          <View className="mb-3 p-2 bg-primary-dark/30 rounded-lg">
+            <Text className="text-text-primary/70 text-xs mb-1">Notes du client:</Text>
+            <Text className="text-text-primary text-sm">{appointment.notes}</Text>
+          </View>
+        )}
+
+        {/* Action Buttons */}
+        {appointment.status === 'pending' && (
+          <View className="flex-row gap-2 mt-3">
+            <TouchableOpacity
+              onPress={() => handleConfirmAppointment(appointment)}
+              className="flex-1 bg-green-500/20 py-2 rounded-lg flex-row items-center justify-center"
+            >
+              <MaterialIcons name="check" size={16} color="#10B981" />
+              <Text className="text-green-500 font-medium ml-1 text-sm">Confirmer</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={() => handleRejectAppointment(appointment)}
+              className="flex-1 bg-red-500/20 py-2 rounded-lg flex-row items-center justify-center"
+            >
+              <MaterialIcons name="close" size={16} color="#EF4444" />
+              <Text className="text-red-500 font-medium ml-1 text-sm">Refuser</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {appointment.status === 'confirmed' && (
+          <View className="flex-row gap-2 mt-3">
+            <TouchableOpacity
+              onPress={() => handleCompleteAppointment(appointment)}
+              className="flex-1 bg-blue-500/20 py-2 rounded-lg flex-row items-center justify-center"
+            >
+              <MaterialIcons name="done" size={16} color="#3B82F6" />
+              <Text className="text-blue-500 font-medium ml-1 text-sm">Marquer terminé</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {(appointment.rejectionReason || appointment.cancellationReason) && (
+          <View className="mt-3 p-2 bg-red-500/10 rounded-lg">
+            <Text className="text-red-500 text-xs mb-1">
+              {appointment.rejectionReason ? 'Raison du refus:' : 'Raison de l\'annulation:'}
+            </Text>
+            <Text className="text-red-500 text-sm">
+              {appointment.rejectionReason || appointment.cancellationReason}
+            </Text>
+          </View>
+        )}
+      </View>
+    );
+  };
 
   if (isLoading) {
     return (
       <View className="flex-1 bg-primary-dark items-center justify-center">
-        <Text className="text-text-primary">Chargement des rendez-vous...</Text>
-      </View>
-    );
-  }
-
-  // Show no salon message for salon owners without salon
-  if (isSalonOwner && !user?.salonId) {
-    return (
-      <View className="flex-1 bg-primary-dark">
-        <View className="px-6 pt-16 pb-6">
-          <Text className="text-3xl font-bold text-text-primary mb-4">Rendez-vous</Text>
-        </View>
-        
-        <View className="px-6">
-          <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-6 items-center">
-            <MaterialIcons name="event-busy" size={64} color="#D4B896" />
-            <Text className="text-text-primary text-xl font-semibold mt-4 mb-2 text-center">
-              Aucun rendez-vous disponible
-            </Text>
-            <Text className="text-text-primary/70 text-center mb-6">
-              Vous devez d'abord créer votre salon pour recevoir des demandes de rendez-vous de vos clients.
-            </Text>
-            
-            <TouchableOpacity 
-              className="bg-primary-beige rounded-xl px-6 py-3"
-              onPress={() => {/* Navigate to create salon */}}
-            >
-              <Text className="text-primary-dark font-semibold">Créer mon salon</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <ActivityIndicator size="large" color="#D4B896" />
+        <Text className="text-text-primary mt-4">Chargement des rendez-vous...</Text>
       </View>
     );
   }
 
   return (
-    <ScrollView 
-      className="flex-1 bg-primary-dark"
-      refreshControl={
-        <RefreshControl refreshing={isRefreshing} onRefresh={onRefresh} tintColor="#D4B896" />
-      }
-    >
+    <View className="flex-1 bg-primary-dark">
       {/* Header */}
       <View className="px-6 pt-16 pb-6">
-        <View className="flex-row justify-between items-center mb-4">
-          <Text className="text-3xl font-bold text-text-primary">
-            {isSalonOwner ? 'Demandes de RDV' : 'Mes Rendez-vous'}
-          </Text>
-          <TouchableOpacity
-            onPress={() => setShowCalendar(!showCalendar)}
-            className="bg-primary-beige/20 p-2 rounded-lg"
-          >
-            <MaterialIcons 
-              name={showCalendar ? "list" : "calendar-today"} 
-              size={24} 
-              color="#D4B896" 
-            />
-          </TouchableOpacity>
-        </View>
+        <Text className="text-3xl font-bold text-text-primary mb-6">Rendez-vous</Text>
 
-        {/* Filter Buttons */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} className="mb-4">
-          <View className="flex-row gap-2">
-            {['all', 'pending', 'confirmed', 'completed'].map((status) => (
-              <TouchableOpacity
-                key={status}
-                onPress={() => setFilterStatus(status as any)}
-                className={`px-4 py-2 rounded-lg ${
-                  filterStatus === status 
-                    ? 'bg-primary-beige' 
-                    : 'bg-primary-light/10 border border-primary-beige/30'
-                }`}
-              >
-                <Text className={`font-medium ${
-                  filterStatus === status 
-                    ? 'text-primary-dark' 
-                    : 'text-text-primary'
-                }`}>
-                  {status === 'all' ? 'Tous' : getStatusText(status as AppointmentStatus)}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-        </ScrollView>
+        {/* Tabs */}
+        <View className="flex-row bg-primary-light/10 rounded-xl p-1">
+          {[
+            { key: 'pending', label: 'En attente' },
+            { key: 'confirmed', label: 'Confirmés' },
+            { key: 'history', label: 'Historique' }
+          ].map((tab) => (
+            <TouchableOpacity
+              key={tab.key}
+              onPress={() => setActiveTab(tab.key as any)}
+              className={`flex-1 py-2 px-3 rounded-lg ${
+                activeTab === tab.key ? 'bg-primary-beige' : ''
+              }`}
+            >
+              <Text className={`text-center font-medium text-sm ${
+                activeTab === tab.key ? 'text-primary-dark' : 'text-text-primary/70'
+              }`}>
+                {tab.label} ({getTabCount(tab.key)})
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
-      {/* Calendar View */}
-      {showCalendar && (
-        <View className="px-6 mb-6">
-          <Calendar
-            onDayPress={(day) => setSelectedDate(day.dateString)}
-            markedDates={{
-              ...getMarkedDates(),
-              [selectedDate]: {
-                ...getMarkedDates()[selectedDate],
-                selected: true,
-                selectedColor: '#D4B896'
-              }
-            }}
-            theme={{
-              backgroundColor: '#2A2A2A',
-              calendarBackground: '#2A2A2A',
-              textSectionTitleColor: '#F5F5F5',
-              dayTextColor: '#F5F5F5',
-              todayTextColor: '#D4B896',
-              selectedDayTextColor: '#2A2A2A',
-              monthTextColor: '#F5F5F5',
-              arrowColor: '#D4B896',
-              textDayHeaderFontSize: 14,
-              textMonthFontSize: 18,
-              textDayFontSize: 16
-            }}
-          />
-        </View>
-      )}
-
-      {/* Appointments List */}
-      <View className="px-6">
+      {/* Content */}
+      <View className="flex-1 px-6">
         {filteredAppointments.length === 0 ? (
-          <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-6 items-center">
-            <MaterialIcons name="event-busy" size={48} color="#D4B896" />
-            <Text className="text-text-primary mt-3 text-center font-semibold">
-              {isSalonOwner ? 'Aucune demande de rendez-vous' : 'Aucun rendez-vous'}
+          <View className="flex-1 items-center justify-center">
+            <MaterialIcons 
+              name={
+                activeTab === 'pending' ? 'schedule' :
+                activeTab === 'confirmed' ? 'event-available' : 'history'
+              } 
+              size={64} 
+              color="#D4B896" 
+            />
+            <Text className="text-text-primary text-lg font-medium mt-4 mb-2">
+              {activeTab === 'pending' ? 'Aucune demande en attente' :
+               activeTab === 'confirmed' ? 'Aucun rendez-vous confirmé' :
+               'Aucun historique'}
             </Text>
-            <Text className="text-text-primary/70 text-center mt-1">
-              {showCalendar 
-                ? `Aucun rendez-vous pour le ${formatDate(selectedDate)}`
-                : isSalonOwner 
-                  ? 'Les demandes de rendez-vous de vos clients apparaîtront ici'
-                  : 'Vos rendez-vous réservés apparaîtront ici'
-              }
+            <Text className="text-text-primary/70 text-center">
+              {activeTab === 'pending' ? 'Les nouvelles demandes de rendez-vous apparaîtront ici' :
+               activeTab === 'confirmed' ? 'Vos rendez-vous confirmés apparaîtront ici' :
+               'L\'historique de vos rendez-vous apparaîtra ici'}
             </Text>
           </View>
         ) : (
-          <View className="space-y-4">
-            {filteredAppointments.map((appointment) => (
-              <TouchableOpacity
-                key={appointment.id}
-                onLongPress={() => showStatusActions(appointment)}
-                className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4"
-              >
-                {/* Header */}
-                <View className="flex-row justify-between items-start mb-3">
-                  <View className="flex-1">
-                    <Text className="text-text-primary font-semibold text-lg">
-                      {isSalonOwner ? appointment.clientName : 'Rendez-vous salon'}
-                    </Text>
-                    <Text className="text-text-primary/70">
-                      {formatDate(appointment.appointmentDate)}
-                    </Text>
-                  </View>
-                  <View className={`px-3 py-1 rounded-full ${getStatusColor(appointment.status)}`}>
-                    <Text className="text-sm font-medium">
-                      {getStatusText(appointment.status)}
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Details */}
-                <View className="space-y-2">
-                  <View className="flex-row items-center">
-                    <MaterialIcons name="schedule" size={16} color="#D4B896" />
-                    <Text className="text-text-primary ml-2">{appointment.timeSlot}</Text>
-                  </View>
-                  
-                  <View className="flex-row items-center">
-                    <MaterialIcons name="phone" size={16} color="#D4B896" />
-                    <Text className="text-text-primary ml-2">{appointment.clientPhone}</Text>
-                  </View>
-                  
-                  <View className="flex-row items-center">
-                    <MaterialIcons name="attach-money" size={16} color="#D4B896" />
-                    <Text className="text-text-primary ml-2">{appointment.totalPrice}€</Text>
-                  </View>
-
-                  <View className="flex-row items-center">
-                    <MaterialIcons name="timer" size={16} color="#D4B896" />
-                    <Text className="text-text-primary ml-2">{appointment.totalDuration} min</Text>
-                  </View>
-                </View>
-
-                {/* Services */}
-                <View className="mt-3 pt-3 border-t border-primary-beige/20">
-                  <Text className="text-text-primary/70 text-sm">
-                    {appointment.services.length} service(s) réservé(s)
-                  </Text>
-                </View>
-
-                {/* Notes */}
-                {(appointment.notes || appointment.salonNotes || appointment.rejectionReason) && (
-                  <View className="mt-3 pt-3 border-t border-primary-beige/20">
-                    {appointment.notes && (
-                      <Text className="text-text-primary/70 text-sm mb-1">
-                        💬 Client: {appointment.notes}
-                      </Text>
-                    )}
-                    {appointment.salonNotes && (
-                      <Text className="text-text-primary/70 text-sm mb-1">
-                        🏪 Salon: {appointment.salonNotes}
-                      </Text>
-                    )}
-                    {appointment.rejectionReason && (
-                      <Text className="text-red-400 text-sm">
-                        ❌ Refusé: {appointment.rejectionReason}
-                      </Text>
-                    )}
-                  </View>
-                )}
-
-                {/* Quick Action Buttons for Salon Owners */}
-                {isSalonOwner && appointment.status === 'pending' && (
-                  <View className="flex-row gap-2 mt-3 pt-3 border-t border-primary-beige/20">
-                    <TouchableOpacity
-                      onPress={() => handleStatusUpdate(appointment.id, 'confirmed')}
-                      className="bg-green-500/20 px-3 py-2 rounded-lg flex-1"
-                    >
-                      <Text className="text-green-500 text-center font-medium">✓ Accepter</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity
-                      onPress={() => {
-                        Alert.alert(
-                          'Refuser le rendez-vous',
-                          'Êtes-vous sûr de vouloir refuser cette demande ?',
-                          [
-                            { text: 'Annuler', style: 'cancel' },
-                            { text: 'Refuser', style: 'destructive', onPress: () => handleStatusUpdate(appointment.id, 'rejected', 'Créneaux non disponible') }
-                          ]
-                        );
-                      }}
-                      className="bg-red-500/20 px-3 py-2 rounded-lg flex-1"
-                    >
-                      <Text className="text-red-500 text-center font-medium">✗ Refuser</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </TouchableOpacity>
-            ))}
-          </View>
+          <FlatList
+            data={filteredAppointments}
+            keyExtractor={(item) => item.id}
+            renderItem={renderAppointmentCard}
+            showsVerticalScrollIndicator={false}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={onRefresh}
+                tintColor="#D4B896"
+              />
+            }
+            contentContainerStyle={{ paddingBottom: 20 }}
+          />
         )}
       </View>
 
-      {/* Bottom Padding */}
-      <View className="h-20" />
-    </ScrollView>
+      {/* Rejection Note Modal */}
+      <Modal
+        visible={showNoteModal}
+        animationType="slide"
+        presentationStyle="pageSheet"
+      >
+        <View className="flex-1 bg-primary-dark">
+          <View className="px-6 pt-16 pb-6">
+            <View className="flex-row justify-between items-center mb-6">
+              <Text className="text-2xl font-bold text-text-primary">
+                Refuser le rendez-vous
+              </Text>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowNoteModal(false);
+                  setSelectedAppointment(null);
+                  setNoteText('');
+                }}
+              >
+                <MaterialIcons name="close" size={24} color="#D4B896" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedAppointment && (
+              <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 mb-6">
+                <Text className="text-text-primary font-semibold mb-1">
+                  {selectedAppointment.clientName}
+                </Text>
+                <Text className="text-text-primary/70 text-sm">
+                  {formatDate(selectedAppointment.appointmentDate)} à {selectedAppointment.timeSlot}
+                </Text>
+                <Text className="text-primary-beige font-medium mt-1">
+                  {selectedAppointment.totalPrice} DH
+                </Text>
+              </View>
+            )}
+
+            <View className="mb-6">
+              <Text className="text-text-primary mb-3 font-medium">
+                Raison du refus (obligatoire)
+              </Text>
+              <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
+                <TextInput
+                  className="text-text-primary"
+                  placeholder="Ex: Créneau non disponible, salon fermé ce jour..."
+                  placeholderTextColor="rgba(245, 245, 245, 0.6)"
+                  value={noteText}
+                  onChangeText={setNoteText}
+                  multiline
+                  numberOfLines={4}
+                  style={{ minHeight: 100 }}
+                />
+              </View>
+            </View>
+
+            <View className="flex-row gap-3">
+              <TouchableOpacity
+                onPress={() => {
+                  setShowNoteModal(false);
+                  setSelectedAppointment(null);
+                  setNoteText('');
+                }}
+                className="flex-1 bg-primary-light/10 border border-primary-beige/30 rounded-xl py-4"
+              >
+                <Text className="text-text-primary text-center font-semibold">Annuler</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                onPress={rejectAppointment}
+                disabled={!noteText.trim()}
+                className={`flex-1 rounded-xl py-4 ${
+                  noteText.trim() ? 'bg-red-500' : 'bg-red-500/50'
+                }`}
+              >
+                <Text className="text-white text-center font-semibold">
+                  Refuser le rendez-vous
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+    </View>
   );
 }
-
-  
