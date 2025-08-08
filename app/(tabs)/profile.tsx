@@ -1,4 +1,4 @@
-// app/(tabs)/profile.tsx
+// app/(tabs)/profile.tsx - UPDATED WITH SALON SETTINGS
 import { useState } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, Alert, Switch } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -49,13 +49,21 @@ export default function ProfileScreen() {
     );
   };
 
+  // Updated profile menu items with salon settings
   const profileMenuItems = [
     {
       icon: 'person',
       title: 'Informations personnelles',
       subtitle: 'Modifiez vos informations de profil',
-      onPress: () => console.log('Edit profile')
+      onPress: () => router.push("/personal-info")
     },
+    // Added salon settings for salon owners
+    ...(isSalonOwner && user?.salonId ? [{
+      icon: 'store',
+      title: 'Paramètres du salon',
+      subtitle: 'Modifiez les informations de votre salon',
+      onPress: () => router.push('/salon-settings')
+    }] : []),
     {
       icon: 'security',
       title: 'Sécurité',
@@ -81,31 +89,26 @@ export default function ProfileScreen() {
       icon: 'help',
       title: 'Centre d\'aide',
       subtitle: 'FAQ et guides d\'utilisation',
-      onPress: () => console.log('Help center')
+      onPress: () => router.push('/help-center')
     },
     {
       icon: 'support-agent',
       title: 'Contacter le support',
       subtitle: 'Besoin d\'aide ? Contactez-nous',
-      onPress: () => console.log('Contact support')
+      onPress: () => router.push('/contact-support')
     },
-    {
-      icon: 'feedback',
-      title: 'Donner un avis',
-      subtitle: 'Aidez-nous à améliorer l\'application',
-      onPress: () => console.log('Give feedback')
-    },
+ 
     {
       icon: 'gavel',
       title: 'Conditions d\'utilisation',
       subtitle: 'Consultez nos conditions',
-      onPress: () => console.log('Terms of service')
+      onPress: () => router.push('/terms-of-service')
     },
     {
       icon: 'privacy-tip',
       title: 'Politique de confidentialité',
       subtitle: 'Comment nous protégeons vos données',
-      onPress: () => console.log('Privacy policy')
+      onPress: () => router.push('/privacy-policy')
     }
   ];
 
@@ -155,7 +158,35 @@ export default function ProfileScreen() {
         </View>
       )}
 
-      {/* Notifications Settings 
+      {/* Quick Actions for Salon Owners */}
+      {isSalonOwner && user?.salonId && (
+        <View className="px-6 mb-6">
+          <Text className="text-xl font-semibold text-text-primary mb-4">Actions rapides</Text>
+          <View className="flex-row gap-3">
+            <TouchableOpacity
+              onPress={() => router.push('/(tabs)/salon')}
+              className="flex-1 bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 items-center"
+            >
+              <MaterialIcons name="dashboard" size={24} color="#D4B896" />
+              <Text className="text-text-primary font-medium mt-2 text-center">
+                Tableau de bord
+              </Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              onPress={() => router.push('/salon-settings')}
+              className="flex-1 bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 items-center"
+            >
+              <MaterialIcons name="settings" size={24} color="#D4B896" />
+              <Text className="text-text-primary font-medium mt-2 text-center">
+                Paramètres salon
+              </Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Notifications Settings */}
       <View className="px-6 mb-6">
         <Text className="text-xl font-semibold text-text-primary mb-4">Notifications</Text>
         <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl">
@@ -190,7 +221,6 @@ export default function ProfileScreen() {
           </View>
         </View>
       </View>
-      */}
 
       {/* Profile Settings */}
       <View className="px-6 mb-6">
