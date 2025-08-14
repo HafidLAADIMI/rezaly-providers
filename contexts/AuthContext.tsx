@@ -1,4 +1,4 @@
-// contexts/AuthContext.tsx
+// contexts/AuthContext.tsx - Updated Provider Version with Notifications
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { User } from '../types';
 import { authService } from '../services/authService';
@@ -29,16 +29,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (mounted) {
         setUser(userData);
         setIsInitialized(true);
-        
-        // Setup notifications for authenticated users
-     //   if (userData) {
-       //   try {
-         //   await notificationService.requestPermissions();
-           // await notificationService.savePushToken(userData.id);
-          //} catch (error) {
-            //console.log('Notification setup failed:', error);
-          //}
-        //}
+
+        // Setup notifications for authenticated salon owners
+        if (userData && userData.role === 'salon_owner') {
+          try {
+            console.log('Setting up notifications for salon owner:', userData.email);
+            
+            // Request permissions
+            const hasPermissions = await notificationService.requestPermissions();
+            if (hasPermissions) {
+              console.log('Notification permissions granted');
+              
+              // Get and save push token to user profile
+              await notificationService.savePushToken(userData.id);
+              console.log('Push token saved for salon owner');
+            } else {
+              console.log('Notification permissions denied');
+            }
+          } catch (error) {
+            console.log('Notification setup failed:', error);
+          }
+        } else if (userData) {
+          console.log('User is not a salon owner, skipping notification setup');
+        }
       }
     });
 
@@ -58,17 +71,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (result.success && result.data) {
         setUser(result.data);
+        
+        // Setup notifications immediately after successful sign in for salon owners
+        if (result.data.role === 'salon_owner') {
+          try {
+            console.log('Setting up notifications after sign in');
+            const hasPermissions = await notificationService.requestPermissions();
+            if (hasPermissions) {
+              await notificationService.savePushToken(result.data.id);
+            }
+          } catch (error) {
+            console.log('Post-signin notification setup failed:', error);
+          }
+        }
+        
         return { success: true };
       }
       
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: result.error || 'Échec de la connexion'
       };
     } catch (error: any) {
       console.error('Sign in error:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: 'Erreur de connexion. Vérifiez votre connexion internet.'
       };
     } finally {
@@ -86,17 +113,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       
       if (result.success && result.data) {
         setUser(result.data);
+        
+        // Setup notifications immediately after successful sign up for salon owners
+        if (result.data.role === 'salon_owner') {
+          try {
+            console.log('Setting up notifications after sign up');
+            const hasPermissions = await notificationService.requestPermissions();
+            if (hasPermissions) {
+              await notificationService.savePushToken(result.data.id);
+            }
+          } catch (error) {
+            console.log('Post-signup notification setup failed:', error);
+          }
+        }
+        
         return { success: true };
       }
       
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: result.error || 'Échec de la création du compte'
       };
     } catch (error: any) {
       console.error('Sign up error:', error);
-      return { 
-        success: false, 
+      return {
+        success: false,
         error: 'Erreur lors de la création du compte.'
       };
     } finally {
@@ -117,13 +158,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ 
-      user, 
-      isLoading, 
+    <AuthContext.Provider value={{
+      user,
+      isLoading,
       isInitialized,
-      signIn, 
-      signUp, 
-      signOut 
+      signIn,
+      signUp,
+      signOut
     }}>
       {children}
     </AuthContext.Provider>

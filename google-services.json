@@ -1,0 +1,48 @@
+{
+  "project_info": {
+    "project_number": "611899067209",
+    "project_id": "resaly-c5f09",
+    "storage_bucket": "resaly-c5f09.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:611899067209:android:79e2540556b4f386336898",
+        "android_client_info": {
+          "package_name": "com.rezalyproviders.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDV-0-22W0d6siTzcFQUo2JdDsyggxNiMc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:611899067209:android:110722a12bd327bc336898",
+        "android_client_info": {
+          "package_name": "com.rezalyusers.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDV-0-22W0d6siTzcFQUo2JdDsyggxNiMc"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
