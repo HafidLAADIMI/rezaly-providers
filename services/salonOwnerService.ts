@@ -1,7 +1,6 @@
 // services/salonOwnerService.ts
 import { 
   doc, 
-  setDoc,
   updateDoc,
   collection, 
   query, 
@@ -9,11 +8,11 @@ import {
   orderBy,
   getDocs,
   addDoc,
-  deleteDoc,
   serverTimestamp
 } from 'firebase/firestore';
 import { db } from '../config/firebase';
 import { Salon, Service, ServiceResponse, OperatingHours } from '../types';
+import { serviceService } from './serviceService';
 
 interface CreateSalonData {
   name: string;
@@ -35,6 +34,7 @@ interface CreateServiceData {
   price: number;
   duration: number;
   categoryId: string;
+  imageUri?: string; // Add image support
 }
 
 class SalonOwnerService {
@@ -84,47 +84,63 @@ class SalonOwnerService {
     }
   }
 
-  // Add service to salon
+  // Add service to salon with image support
   async addService(salonId: string, serviceData: CreateServiceData): Promise<ServiceResponse<string>> {
     try {
-      const service = {
-        ...serviceData,
+      const { imageUri, ...restData } = serviceData;
+      
+      const newService = {
+        ...restData,
         salonId,
-        isActive: true,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+        isActive: true
       };
 
-      const docRef = await addDoc(collection(db, 'services'), service);
-      return { success: true, data: docRef.id };
+      // Use the serviceService's addService method with image support
+      const result = await serviceService.addService(newService, imageUri);
+      
+      if (result.success) {
+        return { success: true, data: result.serviceId! };
+      } else {
+        return { success: false, error: result.error || 'Failed to add service' };
+      }
     } catch (error: any) {
-      console.error('Error adding service:', error);
+      console.error('Error in salonOwnerService.addService:', error);
       return { success: false, error: error.message };
     }
   }
 
-  // Update service
-  async updateService(serviceId: string, updates: Partial<Service>): Promise<ServiceResponse<void>> {
+  // Update service with image support
+  async updateService(serviceId: string, updates: Partial<Service & { imageUri?: string }>): Promise<ServiceResponse<void>> {
     try {
-      await updateDoc(doc(db, 'services', serviceId), {
-        ...updates,
-        updatedAt: serverTimestamp()
-      });
-
-      return { success: true };
+      const { imageUri, ...restUpdates } = updates;
+      
+      // Use the serviceService's updateService method with image support
+      const result = await serviceService.updateService(serviceId, restUpdates, imageUri);
+      
+      if (result.success) {
+        return { success: true };
+      } else {
+        return { success: false, error: result.error || 'Failed to update service' };
+      }
     } catch (error: any) {
-      console.error('Error updating service:', error);
+      console.error('Error in salonOwnerService.updateService:', error);
       return { success: false, error: error.message };
     }
   }
 
-  // Delete service
+  // Delete service with image cleanup
   async deleteService(serviceId: string): Promise<ServiceResponse<void>> {
     try {
-      await deleteDoc(doc(db, 'services', serviceId));
-      return { success: true };
+      // Use the serviceService's deleteService method (includes image cleanup)
+      const result = await serviceService.deleteService(serviceId);
+      
+      if (result.success) {
+        return { success: true };
+      } else {
+        return { success: false, error: result.error || 'Failed to delete service' };
+      }
     } catch (error: any) {
-      console.error('Error deleting service:', error);
+      console.error('Error in salonOwnerService.deleteService:', error);
       return { success: false, error: error.message };
     }
   }

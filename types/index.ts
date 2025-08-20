@@ -33,6 +33,7 @@ export interface Service {
   duration: number; // in minutes
   categoryId: string;
   salonId: string;
+  image?: string;
   isActive: boolean;
   createdAt: any;
   updatedAt: any;

@@ -1,7 +1,9 @@
-// app/(tabs)/salon.tsx - FIXED PROVIDER VERSION
+// app/(tabs)/salon.tsx - FIXED VERSION WITH UPDATED IMAGE PICKER
 import { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, Modal, RefreshControl } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import { Image } from 'expo-image';
 import { useAuth } from '../../contexts/AuthContext';
 import { salonOwnerService } from '../../services/salonOwnerService';
 import { serviceService } from '../../services/serviceService';
@@ -21,20 +23,21 @@ export default function SalonManagementScreen() {
   const [hasSalon, setHasSalon] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  // Form state
+  // Form state with image support
   const [serviceForm, setServiceForm] = useState({
     name: '',
     description: '',
     price: '',
     duration: '',
-    categoryId: ''
+    categoryId: '',
+    imageUri: ''
   });
 
   useEffect(() => {
     loadData();
   }, []);
 
-  // FIXED: Enhanced data loading with better error handling
+  // Enhanced data loading with better error handling
   const loadData = async () => {
     console.log('SalonScreen: Loading data for user:', user?.email);
     console.log('SalonScreen: User salonId:', user?.salonId);
@@ -90,7 +93,7 @@ export default function SalonManagementScreen() {
     }
   };
 
-  // FIXED: Enhanced refresh function
+  // Enhanced refresh function
   const onRefresh = async () => {
     setRefreshing(true);
     await loadData();
@@ -102,22 +105,70 @@ export default function SalonManagementScreen() {
       description: '',
       price: '',
       duration: '',
-      categoryId: ''
+      categoryId: '',
+      imageUri: ''
     });
     setEditingService(null);
   };
 
-  // FIXED: Enhanced service creation with validation
+  // FIXED: Image picker function with better error handling and state management
+  const pickImage = async () => {
+    try {
+      console.log('Starting image picker...');
+      
+      // Request permission
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      if (permissionResult.granted === false) {
+        Alert.alert('Permission requise', 'Vous devez autoriser l\'accès à la galerie pour ajouter une image');
+        return;
+      }
+
+      console.log('Permission granted, launching picker...');
+
+      // Launch image picker with updated API
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ['images'], // FIXED: Use array format for mediaTypes
+        allowsEditing: true,
+        aspect: [4, 3],
+        quality: 0.8,
+      });
+
+      console.log('Picker result:', result);
+
+      if (!result.canceled && result.assets && result.assets[0]) {
+        const imageUri = result.assets[0].uri;
+        console.log('Selected image URI:', imageUri);
+        
+        // Update form state with image URI
+        setServiceForm(prevForm => {
+          console.log('Previous form state:', prevForm);
+          const newForm = { ...prevForm, imageUri };
+          console.log('New form state:', newForm);
+          return newForm;
+        });
+        
+        console.log('Image URI set successfully');
+      } else {
+        console.log('Image picker was canceled or no asset selected');
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Erreur', 'Impossible de sélectionner l\'image: ' + error.message);
+    }
+  };
+
+  // Enhanced service creation with validation and image support
   const handleAddService = async () => {
     if (!user?.salonId) {
       Alert.alert('Erreur', 'Vous devez d\'abord créer votre salon');
       return;
     }
 
-    const { name, description, price, duration, categoryId } = serviceForm;
+    const { name, description, price, duration, categoryId, imageUri } = serviceForm;
 
     if (!name.trim() || !description.trim() || !price || !duration || !categoryId) {
-      Alert.alert('Erreur', 'Veuillez remplir tous les champs');
+      Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
       return;
     }
 
@@ -140,7 +191,8 @@ export default function SalonManagementScreen() {
         description: description.trim(),
         price: priceNum,
         duration: durationNum,
-        categoryId
+        categoryId,
+        imageUri: imageUri || undefined
       });
 
       if (result.success) {
@@ -160,10 +212,10 @@ export default function SalonManagementScreen() {
   const handleEditService = async () => {
     if (!editingService) return;
 
-    const { name, description, price, duration, categoryId } = serviceForm;
+    const { name, description, price, duration, categoryId, imageUri } = serviceForm;
 
     if (!name.trim() || !description.trim() || !price || !duration || !categoryId) {
-      Alert.alert('Erreur', 'Veuillez remplir tous les champs');
+      Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
       return;
     }
 
@@ -186,7 +238,8 @@ export default function SalonManagementScreen() {
         description: description.trim(),
         price: priceNum,
         duration: durationNum,
-        categoryId
+        categoryId,
+        imageUri: imageUri !== editingService.image ? imageUri : undefined // Only pass imageUri if changed
       });
 
       if (result.success) {
@@ -206,7 +259,7 @@ export default function SalonManagementScreen() {
   const handleDeleteService = (service: Service) => {
     Alert.alert(
       'Supprimer le service',
-      `Êtes-vous sûr de vouloir supprimer "${service.name}" ?\n\nCette action supprimera également tous les rendez-vous associés à ce service.`,
+      `Êtes-vous sûr de vouloir supprimer "${service.name}" ?\n\nCette action supprimera également tous les rendez-vous associés à ce service et l'image du service.`,
       [
         { text: 'Annuler', style: 'cancel' },
         {
@@ -237,14 +290,21 @@ export default function SalonManagementScreen() {
       description: service.description,
       price: service.price.toString(),
       duration: service.duration.toString(),
-      categoryId: service.categoryId
+      categoryId: service.categoryId,
+      imageUri: service.image || ''
     });
     setEditingService(service);
     setShowAddServiceModal(true);
   };
 
+  // Enhanced form update function with logging
   const updateServiceForm = (field: string, value: string) => {
-    setServiceForm(prev => ({ ...prev, [field]: value }));
+    console.log(`Updating ${field} to:`, value);
+    setServiceForm(prev => {
+      const newForm = { ...prev, [field]: value };
+      console.log('Form updated:', newForm);
+      return newForm;
+    });
   };
 
   const getCategoryName = (categoryId: string) => {
@@ -252,12 +312,12 @@ export default function SalonManagementScreen() {
     return category?.name || 'Catégorie inconnue';
   };
 
-  // FIXED: Get pending appointments count
+  // Get pending appointments count
   const getPendingAppointmentsCount = () => {
     return appointments.filter(apt => apt.status === 'pending').length;
   };
 
-  // FIXED: Get today's appointments count
+  // Get today's appointments count
   const getTodayAppointmentsCount = () => {
     const today = new Date().toISOString().split('T')[0];
     return appointments.filter(apt => apt.appointmentDate === today).length;
@@ -324,7 +384,7 @@ export default function SalonManagementScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* ADDED: Stats Cards */}
+          {/* Stats Cards */}
           <View className="flex-row gap-3 mb-6">
             <View className="flex-1 bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4">
               <Text className="text-text-primary text-2xl font-bold">{services.length}</Text>
@@ -364,57 +424,113 @@ export default function SalonManagementScreen() {
               </TouchableOpacity>
             </View>
           ) : (
-            <View className="space-y-3">
-              {services.map((service) => (
-                <View
-                  key={service.id}
-                  className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4"
-                >
-                  <View className="flex-row justify-between items-start mb-2">
-                    <View className="flex-1">
-                      <Text className="text-text-primary font-semibold text-lg">
-                        {service.name}
-                      </Text>
-                      <Text className="text-text-primary/70 text-sm">
-                        {getCategoryName(service.categoryId)}
-                      </Text>
+            <View style={{ gap: 12 }}>
+              {services.map((service) => {
+                console.log('Rendering service:', service.name, 'image URL:', service.image);
+                return (
+                  <View
+                    key={service.id}
+                    className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4"
+                  >
+                    {/* Service Image with Enhanced Display */}
+                    {service.image ? (
+                      <View style={{ marginBottom: 12, position: 'relative' }}>
+                        <Image
+                          source={{ uri: service.image }}
+                          style={{ width: '100%', height: 128, borderRadius: 8 }}
+                          contentFit="cover"
+                          placeholder="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+                          transition={200}
+                          onError={(error) => {
+                            console.warn('Failed to load service image:', service.name, error);
+                          }}
+                          onLoad={() => {
+                            console.log('Successfully loaded image for:', service.name);
+                          }}
+                        />
+                        {/* Image indicator */}
+                        <View style={{
+                          position: 'absolute',
+                          top: 8,
+                          left: 8,
+                          backgroundColor: 'rgba(0,0,0,0.6)',
+                          borderRadius: 12,
+                          paddingHorizontal: 8,
+                          paddingVertical: 4
+                        }}>
+                          <Text style={{ color: 'white', fontSize: 10 }}>📷</Text>
+                        </View>
+                      </View>
+                    ) : (
+                      // Show placeholder when no image
+                      <View style={{
+                        marginBottom: 12,
+                        height: 128,
+                        backgroundColor: 'rgba(42, 42, 42, 0.3)',
+                        borderColor: 'rgba(212, 184, 150, 0.2)',
+                        borderWidth: 1,
+                        borderRadius: 8,
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}>
+                        <MaterialIcons name="image" size={32} color="#D4B896" style={{ opacity: 0.5 }} />
+                        <Text style={{ color: 'rgba(245, 245, 245, 0.5)', fontSize: 12, marginTop: 8 }}>Aucune image</Text>
+                      </View>
+                    )}
+
+                    <View className="flex-row justify-between items-start mb-2">
+                      <View className="flex-1">
+                        <Text className="text-text-primary font-semibold text-lg">
+                          {service.name}
+                        </Text>
+                        <Text className="text-text-primary/70 text-sm">
+                          {getCategoryName(service.categoryId)}
+                        </Text>
+                        {/* Show image status */}
+                        {service.image && (
+                          <View className="flex-row items-center mt-1">
+                            <MaterialIcons name="photo" size={12} color="#10B981" />
+                            <Text style={{ color: '#10B981', fontSize: 10, marginLeft: 4 }}>Avec image</Text>
+                          </View>
+                        )}
+                      </View>
+                      <View className="flex-row gap-2">
+                        <TouchableOpacity
+                          onPress={() => openEditService(service)}
+                          className="bg-primary-beige/20 p-2 rounded-lg"
+                        >
+                          <MaterialIcons name="edit" size={20} color="#D4B896" />
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          onPress={() => handleDeleteService(service)}
+                          className="bg-red-500/20 p-2 rounded-lg"
+                        >
+                          <MaterialIcons name="delete" size={20} color="#EF4444" />
+                        </TouchableOpacity>
+                      </View>
                     </View>
-                    <View className="flex-row gap-2">
-                      <TouchableOpacity
-                        onPress={() => openEditService(service)}
-                        className="bg-primary-beige/20 p-2 rounded-lg"
-                      >
-                        <MaterialIcons name="edit" size={20} color="#D4B896" />
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        onPress={() => handleDeleteService(service)}
-                        className="bg-red-500/20 p-2 rounded-lg"
-                      >
-                        <MaterialIcons name="delete" size={20} color="#EF4444" />
-                      </TouchableOpacity>
+
+                    <Text className="text-text-primary/70 mb-3 text-sm">
+                      {service.description}
+                    </Text>
+
+                    <View className="flex-row justify-between items-center">
+                      <View className="flex-row items-center">
+                        <MaterialIcons name="attach-money" size={16} color="#D4B896" />
+                        <Text className="text-text-primary ml-1 font-semibold">
+                          {service.price} DH
+                        </Text>
+                      </View>
+                      <View className="flex-row items-center">
+                        <MaterialIcons name="schedule" size={16} color="#D4B896" />
+                        <Text className="text-text-primary ml-1">
+                          {service.duration} min
+                        </Text>
+                      </View>
                     </View>
                   </View>
-
-                  <Text className="text-text-primary/70 mb-3 text-sm">
-                    {service.description}
-                  </Text>
-
-                  <View className="flex-row justify-between items-center">
-                    <View className="flex-row items-center">
-                      <MaterialIcons name="attach-money" size={16} color="#D4B896" />
-                      <Text className="text-text-primary ml-1 font-semibold">
-                        {service.price} DH
-                      </Text>
-                    </View>
-                    <View className="flex-row items-center">
-                      <MaterialIcons name="schedule" size={16} color="#D4B896" />
-                      <Text className="text-text-primary ml-1">
-                        {service.duration} min
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
+                );
+              })}
             </View>
           )}
         </View>
@@ -498,10 +614,14 @@ export default function SalonManagementScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <View className="space-y-4">
+            <ScrollView 
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ paddingBottom: 40 }}
+            >
+              <View style={{ gap: 16 }}>
                 {/* Service Name */}
-                <View>
+                <View style={{ marginBottom: 16 }}>
                   <Text className="text-text-primary mb-2 font-medium">Nom du service *</Text>
                   <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
                     <TextInput
@@ -515,7 +635,7 @@ export default function SalonManagementScreen() {
                 </View>
 
                 {/* Description */}
-                <View>
+                <View style={{ marginBottom: 16 }}>
                   <Text className="text-text-primary mb-2 font-medium">Description *</Text>
                   <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
                     <TextInput
@@ -531,8 +651,56 @@ export default function SalonManagementScreen() {
                   </View>
                 </View>
 
+                {/* Image Selection */}
+                <View style={{ marginBottom: 16 }}>
+                  <Text className="text-text-primary mb-2 font-medium">Image du service</Text>
+                  <TouchableOpacity
+                    onPress={pickImage}
+                    className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 items-center justify-center"
+                    style={{ minHeight: 120 }}
+                  >
+                    {serviceForm.imageUri ? (
+                      <View className="relative w-full" style={{ height: 100 }}>
+                        <Image
+                          source={{ uri: serviceForm.imageUri }}
+                          style={{ width: '100%', height: '100%', borderRadius: 8 }}
+                          contentFit="cover"
+                          placeholder="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
+                          transition={200}
+                        />
+                        <TouchableOpacity
+                          onPress={() => setServiceForm(prev => ({ ...prev, imageUri: '' }))}
+                          style={{
+                            position: 'absolute',
+                            top: 8,
+                            right: 8,
+                            backgroundColor: '#EF4444',
+                            borderRadius: 12,
+                            width: 24,
+                            height: 24,
+                            alignItems: 'center',
+                            justifyContent: 'center'
+                          }}
+                        >
+                          <MaterialIcons name="close" size={16} color="white" />
+                        </TouchableOpacity>
+                      </View>
+                    ) : (
+                      <View className="items-center">
+                        <MaterialIcons name="add-a-photo" size={32} color="#D4B896" />
+                        <Text className="text-text-primary/70 mt-2 text-center">
+                          Ajouter une image
+                        </Text>
+                        <Text className="text-text-primary/50 text-sm text-center">
+                          Optionnel
+                        </Text>
+                      </View>
+                    )}
+                  </TouchableOpacity>
+                </View>
+
                 {/* Category */}
-                <View>
+                <View style={{ marginBottom: 16 }}>
                   <Text className="text-text-primary mb-2 font-medium">Catégorie *</Text>
                   <ScrollView horizontal showsHorizontalScrollIndicator={false}>
                     <View className="flex-row gap-2">
@@ -560,8 +728,8 @@ export default function SalonManagementScreen() {
                 </View>
 
                 {/* Price and Duration */}
-                <View className="flex-row gap-4">
-                  <View className="flex-1">
+                <View style={{ flexDirection: 'row', gap: 16, marginBottom: 16 }}>
+                  <View style={{ flex: 1 }}>
                     <Text className="text-text-primary mb-2 font-medium">Prix (DH) *</Text>
                     <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
                       <TextInput
@@ -575,7 +743,7 @@ export default function SalonManagementScreen() {
                     </View>
                   </View>
 
-                  <View className="flex-1">
+                  <View style={{ flex: 1 }}>
                     <Text className="text-text-primary mb-2 font-medium">Durée (min) *</Text>
                     <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
                       <TextInput

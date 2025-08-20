@@ -1,4 +1,4 @@
-// app/(tabs)/_layout.tsx - Debug Version to Check StorageService
+// app/(tabs)/_layout.tsx - Fixed Version
 import { Tabs } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { View, Text } from 'react-native';
@@ -40,7 +40,7 @@ function TabBarIcon({ name, color, size, badgeCount }: TabBarIconProps) {
             fontSize: 10,
             fontWeight: 'bold'
           }}>
-            {badgeCount > 99 ? '99+' : badgeCount.toString()}
+            {badgeCount > 99 ? '99+' : String(badgeCount)}
           </Text>
         </View>
       )}
