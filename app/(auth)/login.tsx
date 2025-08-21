@@ -184,14 +184,14 @@ export default function LoginScreen() {
 
           {/* Register Links */}
           <View className="mt-8 space-y-4">
-            <TouchableOpacity 
+            {/* <TouchableOpacity 
               onPress={() => router.push('/(auth)/register')}
               disabled={isLoading}
             >
               <Text className="text-primary-beige text-center">
                 Pas de compte ? <Text className="font-semibold">Créer un compte client</Text>
               </Text>
-            </TouchableOpacity>
+            </TouchableOpacity> */}
             
             <View className="flex-row items-center my-4">
               <View className="flex-1 h-px bg-primary-beige/30" />
