@@ -64,24 +64,24 @@ export default function ProfileScreen() {
       subtitle: 'Modifiez les informations de votre salon',
       onPress: () => router.push('/salon-settings')
     }] : []),
-    {
-      icon: 'security',
-      title: 'Sécurité',
-      subtitle: 'Mot de passe et authentification',
-      onPress: () => console.log('Security settings')
-    },
-    {
-      icon: 'payment',
-      title: 'Moyens de paiement',
-      subtitle: 'Gérez vos cartes et comptes',
-      onPress: () => console.log('Payment methods')
-    },
-    {
-      icon: 'history',
-      title: 'Historique',
-      subtitle: isSalonOwner ? 'Historique des transactions' : 'Historique des rendez-vous',
-      onPress: () => console.log('History')
-    }
+    // {
+    //   icon: 'security',
+    //   title: 'Sécurité',
+    //   subtitle: 'Mot de passe et authentification',
+    //   onPress: () => console.log('Security settings')
+    // },
+    // {
+    //   icon: 'payment',
+    //   title: 'Moyens de paiement',
+    //   subtitle: 'Gérez vos cartes et comptes',
+    //   onPress: () => console.log('Payment methods')
+    // },
+    // {
+    //   icon: 'history',
+    //   title: 'Historique',
+    //   subtitle: isSalonOwner ? 'Historique des transactions' : 'Historique des rendez-vous',
+    //   onPress: () => console.log('History')
+    // }
   ];
 
   const supportMenuItems = [
@@ -187,7 +187,7 @@ export default function ProfileScreen() {
       )}
 
       {/* Notifications Settings */}
-      <View className="px-6 mb-6">
+      {/* <View className="px-6 mb-6">
         <Text className="text-xl font-semibold text-text-primary mb-4">Notifications</Text>
         <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl">
           <View className="px-4 py-4 flex-row items-center justify-between">
@@ -220,7 +220,7 @@ export default function ProfileScreen() {
             />
           </View>
         </View>
-      </View>
+      </View> */}
 
       {/* Profile Settings */}
       <View className="px-6 mb-6">
@@ -288,7 +288,7 @@ export default function ProfileScreen() {
       {/* Danger Zone */}
       <View className="px-6 mb-8">
         <Text className="text-xl font-semibold text-text-primary mb-4">Zone de danger</Text>
-        <View className="space-y-3">
+        <View className="space-y-3 gap-4">
           <TouchableOpacity
             onPress={handleSignOut}
             className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-4 flex-row items-center"

@@ -1,5 +1,5 @@
-// app/create-salon.tsx - MINIMAL UPDATE TO WORK WITH YOUR EXISTING SERVICE
-import { useState } from 'react';
+// app/create-salon.tsx - SIMPLIFIED WITH SINGLE COVER IMAGE
+import { useState, useRef, useEffect } from 'react';
 import { 
   View, 
   Text, 
@@ -9,22 +9,27 @@ import {
   Alert, 
   Modal,
   Platform,
-  PermissionsAndroid
+  PermissionsAndroid,
+  Keyboard,
+  Dimensions,
+  KeyboardAvoidingView,
+  Image
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useAuth } from '../contexts/AuthContext';
 import { salonOwnerService } from '../services/salonOwnerService';
 import * as Location from 'expo-location';
+import * as ImagePicker from 'expo-image-picker';
 
-// Added: Location interface
+const { height: screenHeight } = Dimensions.get('window');
+
 interface LocationCoords {
   latitude: number;
   longitude: number;
   address?: string;
 }
 
-// Added: Morocco cities for easy selection
 const MOROCCO_CITIES = [
   { id: 'casablanca', name: 'Casablanca', latitude: 33.5731, longitude: -7.5898 },
   { id: 'rabat', name: 'Rabat', latitude: 34.0209, longitude: -6.8416 },
@@ -37,10 +42,13 @@ const MOROCCO_CITIES = [
 export default function CreateSalonScreen() {
   const { user } = useAuth();
   const router = useRouter();
+  const scrollViewRef = useRef<ScrollView>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
   
-  // Added: Location selection states
   const [showLocationModal, setShowLocationModal] = useState(false);
   const [locationLoading, setLocationLoading] = useState(false);
   const [selectedLocation, setSelectedLocation] = useState<LocationCoords | null>(null);
@@ -62,10 +70,138 @@ export default function CreateSalonScreen() {
       saturday: { open: '09:00', close: '17:00', isClosed: false },
       sunday: { open: '10:00', close: '16:00', isClosed: true }
     },
-    images: [] as string[]
+    coverImage: '' as string // CHANGED: Single cover image instead of array
   });
 
-  // Added: Location permission request
+  // Keyboard listeners
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+        setKeyboardVisible(true);
+      }
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+        setKeyboardVisible(false);
+      }
+    );
+
+    return () => {
+      keyboardDidHideListener?.remove();
+      keyboardDidShowListener?.remove();
+    };
+  }, []);
+
+  // Request camera/media permissions
+  const requestMediaPermissions = async () => {
+    try {
+      const { status: cameraStatus } = await ImagePicker.requestCameraPermissionsAsync();
+      const { status: mediaStatus } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      
+      return cameraStatus === 'granted' && mediaStatus === 'granted';
+    } catch (error) {
+      console.error('Error requesting permissions:', error);
+      return false;
+    }
+  };
+
+  // SIMPLIFIED: Single image picker function
+  const pickCoverImage = async () => {
+    try {
+      const hasPermissions = await requestMediaPermissions();
+      if (!hasPermissions) {
+        Alert.alert('Permissions requises', 'L\'accès à la galerie et à la caméra est nécessaire pour ajouter une photo.');
+        return;
+      }
+
+      Alert.alert(
+        'Photo de couverture',
+        'Choisissez une belle photo qui représente votre salon',
+        [
+          { text: 'Annuler', style: 'cancel' },
+          { text: 'Galerie', onPress: () => openImagePicker('library') },
+          { text: 'Caméra', onPress: () => openImagePicker('camera') }
+        ]
+      );
+    } catch (error) {
+      console.error('Error in pickCoverImage:', error);
+      Alert.alert('Erreur', 'Impossible d\'accéder aux images');
+    }
+  };
+
+  const openImagePicker = async (source: 'library' | 'camera') => {
+    try {
+      setImageUploading(true);
+      
+      const options: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [16, 9], // Good aspect ratio for salon cover
+        quality: 0.8,
+        allowsMultipleSelection: false
+      };
+
+      let result;
+      if (source === 'camera') {
+        result = await ImagePicker.launchCameraAsync(options);
+      } else {
+        result = await ImagePicker.launchImageLibraryAsync(options);
+      }
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const imageUri = result.assets[0].uri;
+        
+        // SIMPLIFIED: Set single cover image
+        setSalonData(prev => ({
+          ...prev,
+          coverImage: imageUri
+        }));
+        
+        Alert.alert('Succès', 'Photo de couverture ajoutée!');
+      }
+    } catch (error) {
+      console.error('Error picking image:', error);
+      Alert.alert('Erreur', 'Impossible de sélectionner l\'image');
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
+  // SIMPLIFIED: Remove cover image function
+  const removeCoverImage = () => {
+    Alert.alert(
+      'Supprimer la photo',
+      'Êtes-vous sûr de vouloir supprimer cette photo de couverture?',
+      [
+        { text: 'Annuler', style: 'cancel' },
+        { 
+          text: 'Supprimer', 
+          style: 'destructive',
+          onPress: () => {
+            setSalonData(prev => ({
+              ...prev,
+              coverImage: ''
+            }));
+          }
+        }
+      ]
+    );
+  };
+
+  const scrollToInput = (yOffset: number) => {
+    if (scrollViewRef.current && keyboardVisible) {
+      const scrollOffset = Math.max(0, yOffset - (screenHeight - keyboardHeight - 200));
+      scrollViewRef.current.scrollTo({
+        y: scrollOffset,
+        animated: true
+      });
+    }
+  };
+
   const requestLocationPermission = async () => {
     try {
       if (Platform.OS === 'android') {
@@ -82,7 +218,6 @@ export default function CreateSalonScreen() {
     }
   };
 
-  // Added: Get current location
   const getCurrentLocation = async () => {
     try {
       setLocationLoading(true);
@@ -100,7 +235,6 @@ export default function CreateSalonScreen() {
 
       const { latitude, longitude } = location.coords;
 
-      // Try to get address
       try {
         const [addressResult] = await Location.reverseGeocodeAsync({ latitude, longitude });
         const address = `${addressResult.street || ''} ${addressResult.streetNumber || ''}, ${addressResult.city || ''}, ${addressResult.region || ''}`.trim();
@@ -122,9 +256,7 @@ export default function CreateSalonScreen() {
     }
   };
 
-  // Added: Select city location
   const selectCityLocation = (city: typeof MOROCCO_CITIES[0]) => {
-    // Add small random offset to avoid exact duplicates
     setSelectedLocation({
       latitude: city.latitude + (Math.random() - 0.5) * 0.01,
       longitude: city.longitude + (Math.random() - 0.5) * 0.01,
@@ -141,7 +273,6 @@ export default function CreateSalonScreen() {
     Alert.alert('Succès', `Localisation définie sur ${city.name}`);
   };
 
-  // Updated: Create salon with location (using your existing service structure)
   const handleCreateSalon = async () => {
     if (!user) {
       Alert.alert('Erreur', 'Utilisateur non connecté');
@@ -158,29 +289,48 @@ export default function CreateSalonScreen() {
       return;
     }
 
-    // Check if location is selected
     if (!selectedLocation) {
       Alert.alert('Erreur', 'Veuillez définir la localisation de votre salon');
       return;
     }
 
+    // SIMPLIFIED: Check for cover image (optional but recommended)
+    if (!salonData.coverImage) {
+      Alert.alert(
+        'Photo de couverture',
+        'Ajouter une photo de couverture aidera à attirer plus de clients. Voulez-vous continuer sans photo?',
+        [
+          { text: 'Ajouter une photo', onPress: () => pickCoverImage() },
+          { text: 'Continuer sans photo', onPress: () => proceedWithCreation() }
+        ]
+      );
+      return;
+    }
+
+    await proceedWithCreation();
+  };
+
+  const proceedWithCreation = async () => {
     setIsLoading(true);
 
     try {
-      // Use your existing service structure
       const result = await salonOwnerService.createSalon(user.id, {
         ...salonData,
         latitude: selectedLocation.latitude,
-        longitude: selectedLocation.longitude
+        longitude: selectedLocation.longitude,
+        imageUrl: salonData.coverImage // SIMPLIFIED: Send cover image as main image
       });
 
       if (result.success) {
         Alert.alert(
           'Félicitations! 🎉', 
-          'Votre salon a été créé avec succès! Vous pouvez maintenant ajouter vos services et recevoir des demandes de rendez-vous.',
+          'Votre salon a été créé avec succès!',
           [{ 
-            text: 'Commencer', 
-            onPress: () => router.replace('/(tabs)/salon') 
+            text: 'Accéder au tableau de bord', 
+            onPress: () => {
+              router.dismiss();
+              router.replace('/(tabs)/dashboard');
+            }
           }]
         );
       } else {
@@ -217,10 +367,64 @@ export default function CreateSalonScreen() {
   ];
 
   const renderStep1 = () => (
-    <View className="space-y-4">
+    <View style={{ paddingBottom: 20 }}>
       <Text className="text-2xl font-bold text-text-primary mb-4">Informations générales</Text>
       
-      <View>
+      {/* SIMPLIFIED: Single Cover Image Section */}
+      <View style={{ marginBottom: 16 }}>
+        <Text className="text-text-primary mb-2 font-medium">Photo de couverture</Text>
+        <Text className="text-text-primary/70 text-sm mb-3">
+          Ajoutez une belle photo qui représente votre salon
+        </Text>
+        
+        {salonData.coverImage ? (
+          // Show selected cover image
+          <View className="relative">
+            <Image 
+              source={{ uri: salonData.coverImage }}
+              style={{ width: '100%', height: 200 }}
+              className="rounded-xl"
+            />
+            <TouchableOpacity
+              onPress={removeCoverImage}
+              className="absolute top-3 right-3 bg-red-500 rounded-full w-8 h-8 items-center justify-center"
+            >
+              <MaterialIcons name="close" size={20} color="white" />
+            </TouchableOpacity>
+            <TouchableOpacity
+              onPress={pickCoverImage}
+              className="absolute bottom-3 right-3 bg-black/50 rounded-full w-10 h-10 items-center justify-center"
+            >
+              <MaterialIcons name="edit" size={20} color="white" />
+            </TouchableOpacity>
+          </View>
+        ) : (
+          // Show upload button when no image
+          <TouchableOpacity
+            onPress={pickCoverImage}
+            disabled={imageUploading}
+            className="bg-primary-beige/20 border-2 border-dashed border-primary-beige/50 rounded-xl p-8 items-center justify-center"
+            style={{ height: 200 }}
+          >
+            {imageUploading ? (
+              <View className="items-center">
+                <MaterialIcons name="cloud-upload" size={40} color="#D4B896" />
+                <Text className="text-primary-beige font-medium mt-3">Téléchargement...</Text>
+              </View>
+            ) : (
+              <View className="items-center">
+                <MaterialIcons name="add-a-photo" size={40} color="#D4B896" />
+                <Text className="text-primary-beige font-medium mt-3 text-lg">Ajouter une photo</Text>
+                <Text className="text-primary-beige/70 text-sm mt-1">Recommandé pour attirer les clients</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Rest of the form remains the same */}
+      {/* Salon Name */}
+      <View style={{ marginBottom: 16 }}>
         <Text className="text-text-primary mb-2 font-medium">Nom du salon *</Text>
         <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
           <TextInput
@@ -229,27 +433,50 @@ export default function CreateSalonScreen() {
             placeholderTextColor="rgba(245, 245, 245, 0.6)"
             value={salonData.name}
             onChangeText={(value) => updateSalonData('name', value)}
+            onFocus={(e) => {
+              setTimeout(() => {
+                (e.target as any)?.measure?.((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+                  scrollToInput(pageY);
+                });
+              }, 100);
+            }}
+            returnKeyType="next"
+            style={{ fontSize: 16 }}
           />
         </View>
       </View>
 
-      <View>
+      {/* Description */}
+      <View style={{ marginBottom: 16 }}>
         <Text className="text-text-primary mb-2 font-medium">Description *</Text>
         <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
           <TextInput
             className="text-text-primary"
-            placeholder="Décrivez votre salon..."
+            placeholder="Décrivez votre salon, vos spécialités, votre ambiance..."
             placeholderTextColor="rgba(245, 245, 245, 0.6)"
             value={salonData.description}
             onChangeText={(value) => updateSalonData('description', value)}
+            onFocus={(e) => {
+              setTimeout(() => {
+                (e.target as any)?.measure?.((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+                  scrollToInput(pageY);
+                });
+              }, 100);
+            }}
             multiline
             numberOfLines={4}
-            style={{ minHeight: 100 }}
+            style={{ 
+              minHeight: 100, 
+              textAlignVertical: 'top',
+              fontSize: 16
+            }}
+            returnKeyType="next"
           />
         </View>
       </View>
 
-      <View>
+      {/* Address */}
+      <View style={{ marginBottom: 16 }}>
         <Text className="text-text-primary mb-2 font-medium">Adresse complète *</Text>
         <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
           <TextInput
@@ -258,12 +485,23 @@ export default function CreateSalonScreen() {
             placeholderTextColor="rgba(245, 245, 245, 0.6)"
             value={salonData.address}
             onChangeText={(value) => updateSalonData('address', value)}
+            onFocus={(e) => {
+              setTimeout(() => {
+                (e.target as any)?.measure?.((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+                  scrollToInput(pageY);
+                });
+              }, 100);
+            }}
             multiline
             numberOfLines={2}
+            style={{ 
+              textAlignVertical: 'top',
+              fontSize: 16
+            }}
+            returnKeyType="next"
           />
         </View>
         
-        {/* Added: Location selection button */}
         <TouchableOpacity
           onPress={() => setShowLocationModal(true)}
           className="mt-2 bg-primary-beige/20 border border-primary-beige/30 rounded-lg p-3 flex-row items-center justify-center"
@@ -274,7 +512,6 @@ export default function CreateSalonScreen() {
           </Text>
         </TouchableOpacity>
         
-        {/* Added: Location confirmation */}
         {selectedLocation && (
           <View className="mt-2 p-3 bg-green-500/10 border border-green-500/30 rounded-lg">
             <Text className="text-green-400 text-sm font-medium mb-1">✓ Localisation définie</Text>
@@ -283,7 +520,8 @@ export default function CreateSalonScreen() {
         )}
       </View>
 
-      <View>
+      {/* Phone */}
+      <View style={{ marginBottom: 16 }}>
         <Text className="text-text-primary mb-2 font-medium">Téléphone</Text>
         <View className="bg-primary-light/10 border border-primary-beige/30 rounded-xl px-4 py-4">
           <TextInput
@@ -292,7 +530,16 @@ export default function CreateSalonScreen() {
             placeholderTextColor="rgba(245, 245, 245, 0.6)"
             value={salonData.phone}
             onChangeText={(value) => updateSalonData('phone', value)}
+            onFocus={(e) => {
+              setTimeout(() => {
+                (e.target as any)?.measure?.((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+                  scrollToInput(pageY);
+                });
+              }, 100);
+            }}
             keyboardType="phone-pad"
+            returnKeyType="done"
+            style={{ fontSize: 16 }}
           />
         </View>
       </View>
@@ -300,7 +547,7 @@ export default function CreateSalonScreen() {
   );
 
   const renderStep2 = () => (
-    <View className="space-y-4">
+    <View style={{ paddingBottom: 20 }}>
       <Text className="text-2xl font-bold text-text-primary mb-4">Catégories de services</Text>
       
       <Text className="text-text-primary/70 mb-4">
@@ -331,7 +578,7 @@ export default function CreateSalonScreen() {
       </View>
 
       {salonData.categories.length > 0 && (
-        <View className="bg-primary-beige/10 border border-primary-beige/30 rounded-xl p-4">
+        <View className="bg-primary-beige/10 border border-primary-beige/30 rounded-xl p-4 mt-4">
           <Text className="text-primary-beige font-medium mb-2">Services sélectionnés:</Text>
           <Text className="text-text-primary text-sm">
             {salonData.categories.map(catId => 
@@ -344,11 +591,11 @@ export default function CreateSalonScreen() {
   );
 
   const renderStep3 = () => (
-    <View className="space-y-4">
+    <View style={{ paddingBottom: 20 }}>
       <Text className="text-2xl font-bold text-text-primary mb-4">Horaires d'ouverture</Text>
       
-      {Object.entries(salonData.operatingHours).map(([day, hours]) => (
-        <View key={day} className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4">
+      {Object.entries(salonData.operatingHours).map(([day, hours], index) => (
+        <View key={day} className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4" style={{ marginBottom: 12 }}>
           <View className="flex-row justify-between items-center mb-3">
             <Text className="text-text-primary font-medium capitalize">
               {day === 'monday' ? 'Lundi' :
@@ -391,8 +638,18 @@ export default function CreateSalonScreen() {
                         [day]: { ...hours, open: value }
                       });
                     }}
+                    onFocus={(e) => {
+                      setTimeout(() => {
+                        (e.target as any)?.measure?.((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+                          scrollToInput(pageY);
+                        });
+                      }, 100);
+                    }}
                     placeholder="09:00"
                     placeholderTextColor="rgba(245, 245, 245, 0.6)"
+                    keyboardType="numeric"
+                    returnKeyType="next"
+                    style={{ fontSize: 16 }}
                   />
                 </View>
               </View>
@@ -409,8 +666,18 @@ export default function CreateSalonScreen() {
                         [day]: { ...hours, close: value }
                       });
                     }}
+                    onFocus={(e) => {
+                      setTimeout(() => {
+                        (e.target as any)?.measure?.((x: number, y: number, width: number, height: number, pageX: number, pageY: number) => {
+                          scrollToInput(pageY);
+                        });
+                      }, 100);
+                    }}
                     placeholder="18:00"
                     placeholderTextColor="rgba(245, 245, 245, 0.6)"
+                    keyboardType="numeric"
+                    returnKeyType={index === Object.entries(salonData.operatingHours).length - 1 ? "done" : "next"}
+                    style={{ fontSize: 16 }}
                   />
                 </View>
               </View>
@@ -422,43 +689,78 @@ export default function CreateSalonScreen() {
   );
 
   return (
-    <View className="flex-1 bg-primary-dark">
-      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
-        <View className="pt-16 pb-6">
-          <View className="flex-row items-center mb-4">
-            <TouchableOpacity onPress={() => router.back()}>
-              <MaterialIcons name="arrow-back" size={24} color="#D4B896" />
-            </TouchableOpacity>
-            <Text className="text-3xl font-bold text-text-primary ml-4">Créer mon salon</Text>
-          </View>
-          
-          <View className="flex-row items-center justify-between mt-4">
-            {[1, 2, 3].map((step) => (
-              <View key={step} className="flex-row items-center flex-1">
-                <View className={`w-8 h-8 rounded-full items-center justify-center ${
-                  currentStep >= step ? 'bg-primary-beige' : 'bg-primary-light/20'
-                }`}>
-                  <Text className={`font-semibold ${
-                    currentStep >= step ? 'text-primary-dark' : 'text-text-primary/50'
-                  }`}>
-                    {step}
-                  </Text>
-                </View>
-                {step < 3 && (
-                  <View className={`flex-1 h-1 mx-2 ${
-                    currentStep > step ? 'bg-primary-beige' : 'bg-primary-light/20'
-                  }`} />
-                )}
-              </View>
-            ))}
-          </View>
+    <View style={{ flex: 1, backgroundColor: '#2C2C2C' }}>
+      {/* Header */}
+      <View style={{ 
+        paddingTop: 60, 
+        paddingHorizontal: 24, 
+        paddingBottom: 16,
+        backgroundColor: '#2C2C2C',
+        zIndex: 10
+      }}>
+        <View className="flex-row items-center mb-4">
+          <TouchableOpacity onPress={() => router.back()}>
+            <MaterialIcons name="arrow-back" size={24} color="#D4B896" />
+          </TouchableOpacity>
+          <Text className="text-3xl font-bold text-text-primary ml-4">Créer mon salon</Text>
         </View>
+        
+        <View className="flex-row items-center justify-between">
+          {[1, 2, 3].map((step) => (
+            <View key={step} className="flex-row items-center flex-1">
+              <View className={`w-8 h-8 rounded-full items-center justify-center ${
+                currentStep >= step ? 'bg-primary-beige' : 'bg-primary-light/20'
+              }`}>
+                <Text className={`font-semibold ${
+                  currentStep >= step ? 'text-primary-dark' : 'text-text-primary/50'
+                }`}>
+                  {step}
+                </Text>
+              </View>
+              {step < 3 && (
+                <View className={`flex-1 h-1 mx-2 ${
+                  currentStep > step ? 'bg-primary-beige' : 'bg-primary-light/20'
+                }`} />
+              )}
+            </View>
+          ))}
+        </View>
+      </View>
 
-        {currentStep === 1 && renderStep1()}
-        {currentStep === 2 && renderStep2()}
-        {currentStep === 3 && renderStep3()}
+      {/* Main Content */}
+      <KeyboardAvoidingView 
+        style={{ flex: 1 }}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          style={{ flex: 1 }}
+          contentContainerStyle={{ 
+            paddingHorizontal: 24,
+            paddingBottom: keyboardVisible ? keyboardHeight + 100 : 120
+          }}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        >
+          {currentStep === 1 && renderStep1()}
+          {currentStep === 2 && renderStep2()}
+          {currentStep === 3 && renderStep3()}
+        </ScrollView>
+      </KeyboardAvoidingView>
 
-        <View className="flex-row gap-4 mt-8 mb-8">
+      {/* Fixed Bottom Buttons */}
+      <View style={{ 
+        paddingHorizontal: 24, 
+        paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+        paddingTop: 16,
+        backgroundColor: '#2C2C2C',
+        borderTopWidth: 1,
+        borderTopColor: 'rgba(212, 184, 150, 0.1)',
+        marginBottom: keyboardVisible ? keyboardHeight : 0
+      }}>
+        <View className="flex-row gap-4">
           {currentStep > 1 && (
             <TouchableOpacity
               onPress={() => setCurrentStep(currentStep - 1)}
@@ -471,7 +773,6 @@ export default function CreateSalonScreen() {
           <TouchableOpacity
             onPress={() => {
               if (currentStep < 3) {
-                // Added: Validation for location
                 if (currentStep === 1) {
                   if (!salonData.name.trim() || !salonData.description.trim() || !salonData.address.trim()) {
                     Alert.alert('Erreur', 'Veuillez remplir tous les champs obligatoires');
@@ -483,6 +784,7 @@ export default function CreateSalonScreen() {
                   }
                 }
                 setCurrentStep(currentStep + 1);
+                scrollViewRef.current?.scrollTo({ y: 0, animated: true });
               } else {
                 handleCreateSalon();
               }
@@ -495,12 +797,12 @@ export default function CreateSalonScreen() {
             </Text>
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      </View>
 
-      {/* Added: Location Selection Modal */}
+      {/* Location Modal */}
       <Modal visible={showLocationModal} animationType="slide" presentationStyle="pageSheet">
-        <View className="flex-1 bg-primary-dark">
-          <View className="px-6 pt-16 pb-6">
+        <View style={{ flex: 1, backgroundColor: '#2C2C2C' }}>
+          <View style={{ paddingHorizontal: 24, paddingTop: 60, paddingBottom: 24 }}>
             <View className="flex-row justify-between items-center mb-6">
               <Text className="text-2xl font-bold text-text-primary">Localisation du salon</Text>
               <TouchableOpacity onPress={() => setShowLocationModal(false)}>
@@ -508,7 +810,7 @@ export default function CreateSalonScreen() {
               </TouchableOpacity>
             </View>
 
-            <ScrollView>
+            <ScrollView showsVerticalScrollIndicator={false}>
               {/* Current Location */}
               <TouchableOpacity
                 onPress={getCurrentLocation}
@@ -538,6 +840,8 @@ export default function CreateSalonScreen() {
                   <Text className="text-text-primary ml-3">{city.name}</Text>
                 </TouchableOpacity>
               ))}
+              
+              <View style={{ height: 50 }} />
             </ScrollView>
           </View>
         </View>

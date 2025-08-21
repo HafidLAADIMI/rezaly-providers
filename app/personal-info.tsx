@@ -171,7 +171,7 @@ export default function PersonalInfoScreen() {
         </View>
 
         {/* Account Actions */}
-        {!isEditing && (
+        {/* {!isEditing && (
           <View className="mt-8 space-y-3">
             <TouchableOpacity className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 flex-row items-center">
               <MaterialIcons name="lock" size={24} color="#D4B896" />
@@ -191,7 +191,7 @@ export default function PersonalInfoScreen() {
               <MaterialIcons name="chevron-right" size={20} color="#D4B896" />
             </TouchableOpacity>
           </View>
-        )}
+        )} */}
 
         <View className="h-20" />
       </ScrollView>

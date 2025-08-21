@@ -1,9 +1,10 @@
-// app/(tabs)/_layout.tsx - Fixed Version
+// app/(tabs)/_layout.tsx - SIMPLE VERIFICATION CHECK
 import { Tabs } from 'expo-router';
 import { MaterialIcons } from '@expo/vector-icons';
 import { View, Text } from 'react-native';
 import { useState, useEffect, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
+import { salonOwnerService } from '../../services/salonOwnerService';
 import { useFocusEffect } from '@react-navigation/native';
 
 // Debug import
@@ -23,7 +24,7 @@ function TabBarIcon({ name, color, size, badgeCount }: TabBarIconProps) {
   return (
     <View style={{ position: 'relative' }}>
       <MaterialIcons name={name} size={size} color={color} />
-      {badgeCount && badgeCount > 0 && (
+      {typeof badgeCount === 'number' && badgeCount > 0 && (
         <View style={{
           position: 'absolute',
           top: -4,
@@ -40,7 +41,7 @@ function TabBarIcon({ name, color, size, badgeCount }: TabBarIconProps) {
             fontSize: 10,
             fontWeight: 'bold'
           }}>
-            {badgeCount > 99 ? '99+' : String(badgeCount)}
+            {badgeCount > 99 ? '99+' : badgeCount.toString()}
           </Text>
         </View>
       )}
@@ -51,9 +52,26 @@ function TabBarIcon({ name, color, size, badgeCount }: TabBarIconProps) {
 export default function TabLayout() {
   const { user } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
+  const [salon, setSalon] = useState(null);
+  
   const isSalonOwner = user?.role === 'salon_owner';
+  const hasSalon = !!user?.salonId;
 
-  console.log('TabLayout: User role:', user?.role, 'isSalonOwner:', isSalonOwner);
+  console.log('TabLayout: User role:', user?.role, 'isSalonOwner:', isSalonOwner, 'hasSalon:', hasSalon);
+
+  // Check salon verification status (same as dashboard)
+  const checkSalonStatus = useCallback(async () => {
+    if (isSalonOwner && hasSalon) {
+      try {
+        const userSalons = await salonOwnerService.getUserSalons(user.id);
+        if (userSalons.length > 0) {
+          setSalon(userSalons[0]);
+        }
+      } catch (error) {
+        console.error('Error loading salon:', error);
+      }
+    }
+  }, [isSalonOwner, hasSalon, user?.id]);
 
   // Load unread notifications count
   const loadUnreadCount = useCallback(async () => {
@@ -80,16 +98,21 @@ export default function TabLayout() {
     }
   }, [user?.id]);
 
-  // Reload unread count when tab layout is focused
+  // Reload data when tab layout is focused
   useFocusEffect(
     useCallback(() => {
+      checkSalonStatus();
       loadUnreadCount();
-    }, [loadUnreadCount])
+    }, [checkSalonStatus, loadUnreadCount])
   );
 
   useEffect(() => {
+    checkSalonStatus();
     loadUnreadCount();
-  }, [loadUnreadCount]);
+  }, [checkSalonStatus, loadUnreadCount]);
+
+  // Simple verification check - same logic as dashboard
+  const isVerifiedSalonOwner = isSalonOwner && hasSalon && salon && salon.isActive && salon.isVerified !== false;
 
   return (
     <Tabs
@@ -134,7 +157,7 @@ export default function TabLayout() {
           ),
         }}
       />
-      {/* Always render salon screen, but hide if not salon owner */}
+      {/* Hide salon tab until verified */}
       <Tabs.Screen
         name="salon"
         options={{
@@ -142,10 +165,10 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <TabBarIcon name="store" color={color} size={size} />
           ),
-          href: isSalonOwner ? '/(tabs)/salon' : null, // Hide tab if not salon owner
+          href: isVerifiedSalonOwner ? '/(tabs)/salon' : null,
         }}
       />
-      {/* Always render analytics screen, but hide if not salon owner */}
+      {/* Hide analytics tab until verified */}
       <Tabs.Screen
         name="analytics"
         options={{
@@ -153,7 +176,7 @@ export default function TabLayout() {
           tabBarIcon: ({ color, size }) => (
             <TabBarIcon name="analytics" color={color} size={size} />
           ),
-          href: isSalonOwner ? '/(tabs)/analytics' : null, // Hide tab if not salon owner
+          href: isVerifiedSalonOwner ? '/(tabs)/analytics' : null,
         }}
       />
       <Tabs.Screen
