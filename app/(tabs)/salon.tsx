@@ -1,6 +1,6 @@
-// app/(tabs)/salon.tsx - FIXED VERSION WITH UPDATED IMAGE PICKER
+// app/(tabs)/salon.tsx - FIXED VERSION WITH LOADING STATES
 import { useState, useEffect } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, Modal, RefreshControl } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, TextInput, Alert, Modal, RefreshControl, ActivityIndicator } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { Image } from 'expo-image';
@@ -22,6 +22,10 @@ export default function SalonManagementScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [hasSalon, setHasSalon] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  
+  // ADDED: Loading states to prevent duplicate submissions
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isDeletingService, setIsDeletingService] = useState<string | null>(null);
 
   // Form state with image support
   const [serviceForm, setServiceForm] = useState({
@@ -111,7 +115,7 @@ export default function SalonManagementScreen() {
     setEditingService(null);
   };
 
-  // FIXED: Image picker function with better error handling and state management
+  // Image picker function
   const pickImage = async () => {
     try {
       console.log('Starting image picker...');
@@ -126,9 +130,9 @@ export default function SalonManagementScreen() {
 
       console.log('Permission granted, launching picker...');
 
-      // Launch image picker with updated API
+      // Launch image picker
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ['images'], // FIXED: Use array format for mediaTypes
+        mediaTypes: ['images'],
         allowsEditing: true,
         aspect: [4, 3],
         quality: 0.8,
@@ -140,7 +144,6 @@ export default function SalonManagementScreen() {
         const imageUri = result.assets[0].uri;
         console.log('Selected image URI:', imageUri);
         
-        // Update form state with image URI
         setServiceForm(prevForm => {
           console.log('Previous form state:', prevForm);
           const newForm = { ...prevForm, imageUri };
@@ -158,8 +161,10 @@ export default function SalonManagementScreen() {
     }
   };
 
-  // Enhanced service creation with validation and image support
+  // Enhanced service creation with loading state
   const handleAddService = async () => {
+    if (isSubmitting) return; // Prevent duplicate submissions
+    
     if (!user?.salonId) {
       Alert.alert('Erreur', 'Vous devez d\'abord créer votre salon');
       return;
@@ -186,6 +191,8 @@ export default function SalonManagementScreen() {
     }
 
     try {
+      setIsSubmitting(true); // Start loading
+      
       const result = await salonOwnerService.addService(user.salonId, {
         name: name.trim(),
         description: description.trim(),
@@ -206,10 +213,14 @@ export default function SalonManagementScreen() {
     } catch (error) {
       console.error('Error adding service:', error);
       Alert.alert('Erreur', 'Impossible d\'ajouter le service');
+    } finally {
+      setIsSubmitting(false); // Stop loading
     }
   };
 
   const handleEditService = async () => {
+    if (isSubmitting) return; // Prevent duplicate submissions
+    
     if (!editingService) return;
 
     const { name, description, price, duration, categoryId, imageUri } = serviceForm;
@@ -233,13 +244,15 @@ export default function SalonManagementScreen() {
     }
 
     try {
+      setIsSubmitting(true); // Start loading
+      
       const result = await salonOwnerService.updateService(editingService.id, {
         name: name.trim(),
         description: description.trim(),
         price: priceNum,
         duration: durationNum,
         categoryId,
-        imageUri: imageUri !== editingService.image ? imageUri : undefined // Only pass imageUri if changed
+        imageUri: imageUri !== editingService.image ? imageUri : undefined
       });
 
       if (result.success) {
@@ -253,10 +266,15 @@ export default function SalonManagementScreen() {
     } catch (error) {
       console.error('Error updating service:', error);
       Alert.alert('Erreur', 'Impossible de modifier le service');
+    } finally {
+      setIsSubmitting(false); // Stop loading
     }
   };
 
   const handleDeleteService = (service: Service) => {
+    // Prevent deletion if already deleting this service
+    if (isDeletingService === service.id) return;
+    
     Alert.alert(
       'Supprimer le service',
       `Êtes-vous sûr de vouloir supprimer "${service.name}" ?\n\nCette action supprimera également tous les rendez-vous associés à ce service et l'image du service.`,
@@ -267,6 +285,8 @@ export default function SalonManagementScreen() {
           style: 'destructive',
           onPress: async () => {
             try {
+              setIsDeletingService(service.id); // Start loading for this specific service
+              
               const result = await salonOwnerService.deleteService(service.id);
               if (result.success) {
                 Alert.alert('Succès', 'Service supprimé avec succès');
@@ -277,6 +297,8 @@ export default function SalonManagementScreen() {
             } catch (error) {
               console.error('Error deleting service:', error);
               Alert.alert('Erreur', 'Impossible de supprimer le service');
+            } finally {
+              setIsDeletingService(null); // Stop loading
             }
           }
         }
@@ -326,7 +348,8 @@ export default function SalonManagementScreen() {
   if (isLoading) {
     return (
       <View className="flex-1 bg-primary-dark items-center justify-center">
-        <Text className="text-text-primary">Chargement...</Text>
+        <ActivityIndicator size="large" color="#D4B896" />
+        <Text className="text-text-primary mt-4">Chargement...</Text>
       </View>
     );
   }
@@ -378,6 +401,7 @@ export default function SalonManagementScreen() {
             <TouchableOpacity
               onPress={() => setShowAddServiceModal(true)}
               className="bg-primary-beige rounded-xl px-4 py-2 flex-row items-center"
+              disabled={isSubmitting} // Disable when submitting
             >
               <MaterialIcons name="add" size={20} color="#2A2A2A" />
               <Text className="text-primary-dark font-semibold ml-1">Service</Text>
@@ -419,6 +443,7 @@ export default function SalonManagementScreen() {
               <TouchableOpacity
                 onPress={() => setShowAddServiceModal(true)}
                 className="bg-primary-beige rounded-lg px-4 py-2"
+                disabled={isSubmitting} // Disable when submitting
               >
                 <Text className="text-primary-dark font-semibold">Ajouter un service</Text>
               </TouchableOpacity>
@@ -426,13 +451,14 @@ export default function SalonManagementScreen() {
           ) : (
             <View style={{ gap: 12 }}>
               {services.map((service) => {
-                console.log('Rendering service:', service.name, 'image URL:', service.image);
+                const isDeleting = isDeletingService === service.id;
                 return (
                   <View
                     key={service.id}
                     className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4"
+                    style={{ opacity: isDeleting ? 0.6 : 1 }}
                   >
-                    {/* Service Image with Enhanced Display */}
+                    {/* Service Image */}
                     {service.image ? (
                       <View style={{ marginBottom: 12, position: 'relative' }}>
                         <Image
@@ -441,14 +467,7 @@ export default function SalonManagementScreen() {
                           contentFit="cover"
                           placeholder="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8/5+hHgAHggJ/PchI7wAAAABJRU5ErkJggg=="
                           transition={200}
-                          onError={(error) => {
-                            console.warn('Failed to load service image:', service.name, error);
-                          }}
-                          onLoad={() => {
-                            console.log('Successfully loaded image for:', service.name);
-                          }}
                         />
-                        {/* Image indicator */}
                         <View style={{
                           position: 'absolute',
                           top: 8,
@@ -462,7 +481,6 @@ export default function SalonManagementScreen() {
                         </View>
                       </View>
                     ) : (
-                      // Show placeholder when no image
                       <View style={{
                         marginBottom: 12,
                         height: 128,
@@ -486,7 +504,6 @@ export default function SalonManagementScreen() {
                         <Text className="text-text-primary/70 text-sm">
                           {getCategoryName(service.categoryId)}
                         </Text>
-                        {/* Show image status */}
                         {service.image && (
                           <View className="flex-row items-center mt-1">
                             <MaterialIcons name="photo" size={12} color="#10B981" />
@@ -498,14 +515,20 @@ export default function SalonManagementScreen() {
                         <TouchableOpacity
                           onPress={() => openEditService(service)}
                           className="bg-primary-beige/20 p-2 rounded-lg"
+                          disabled={isDeleting || isSubmitting}
                         >
                           <MaterialIcons name="edit" size={20} color="#D4B896" />
                         </TouchableOpacity>
                         <TouchableOpacity
                           onPress={() => handleDeleteService(service)}
                           className="bg-red-500/20 p-2 rounded-lg"
+                          disabled={isDeleting || isSubmitting}
                         >
-                          <MaterialIcons name="delete" size={20} color="#EF4444" />
+                          {isDeleting ? (
+                            <ActivityIndicator size="small" color="#EF4444" />
+                          ) : (
+                            <MaterialIcons name="delete" size={20} color="#EF4444" />
+                          )}
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -588,11 +611,10 @@ export default function SalonManagementScreen() {
           </View>
         )}
 
-        {/* Bottom Padding */}
         <View className="h-20" />
       </ScrollView>
 
-      {/* Add/Edit Service Modal */}
+      {/* Add/Edit Service Modal with Loading State */}
       <Modal
         visible={showAddServiceModal}
         animationType="slide"
@@ -606,9 +628,12 @@ export default function SalonManagementScreen() {
               </Text>
               <TouchableOpacity
                 onPress={() => {
-                  setShowAddServiceModal(false);
-                  resetForm();
+                  if (!isSubmitting) {
+                    setShowAddServiceModal(false);
+                    resetForm();
+                  }
                 }}
+                disabled={isSubmitting}
               >
                 <MaterialIcons name="close" size={24} color="#D4B896" />
               </TouchableOpacity>
@@ -630,6 +655,7 @@ export default function SalonManagementScreen() {
                       placeholderTextColor="rgba(245, 245, 245, 0.6)"
                       value={serviceForm.name}
                       onChangeText={(value) => updateServiceForm('name', value)}
+                      editable={!isSubmitting}
                     />
                   </View>
                 </View>
@@ -647,6 +673,7 @@ export default function SalonManagementScreen() {
                       multiline
                       numberOfLines={3}
                       style={{ minHeight: 80 }}
+                      editable={!isSubmitting}
                     />
                   </View>
                 </View>
@@ -658,6 +685,7 @@ export default function SalonManagementScreen() {
                     onPress={pickImage}
                     className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 items-center justify-center"
                     style={{ minHeight: 120 }}
+                    disabled={isSubmitting}
                   >
                     {serviceForm.imageUri ? (
                       <View className="relative w-full" style={{ height: 100 }}>
@@ -681,6 +709,7 @@ export default function SalonManagementScreen() {
                             alignItems: 'center',
                             justifyContent: 'center'
                           }}
+                          disabled={isSubmitting}
                         >
                           <MaterialIcons name="close" size={16} color="white" />
                         </TouchableOpacity>
@@ -713,6 +742,7 @@ export default function SalonManagementScreen() {
                               ? 'bg-primary-beige'
                               : 'bg-primary-light/10 border border-primary-beige/30'
                           }`}
+                          disabled={isSubmitting}
                         >
                           <Text className={`font-medium ${
                             serviceForm.categoryId === category.id
@@ -739,6 +769,7 @@ export default function SalonManagementScreen() {
                         value={serviceForm.price}
                         onChangeText={(value) => updateServiceForm('price', value)}
                         keyboardType="numeric"
+                        editable={!isSubmitting}
                       />
                     </View>
                   </View>
@@ -753,18 +784,38 @@ export default function SalonManagementScreen() {
                         value={serviceForm.duration}
                         onChangeText={(value) => updateServiceForm('duration', value)}
                         keyboardType="numeric"
+                        editable={!isSubmitting}
                       />
                     </View>
                   </View>
                 </View>
 
-                {/* Submit Button */}
+                {/* Submit Button with Loading State */}
                 <TouchableOpacity
                   onPress={editingService ? handleEditService : handleAddService}
-                  className="bg-primary-beige rounded-xl py-4 mt-6"
+                  className={`rounded-xl py-4 mt-6 flex-row items-center justify-center ${
+                    isSubmitting 
+                      ? 'bg-primary-beige/50' 
+                      : 'bg-primary-beige'
+                  }`}
+                  disabled={isSubmitting}
                 >
-                  <Text className="text-primary-dark text-center font-semibold text-lg">
-                    {editingService ? 'Modifier le service' : 'Ajouter le service'}
+                  {isSubmitting && (
+                    <ActivityIndicator 
+                      size="small" 
+                      color="#2A2A2A" 
+                      style={{ marginRight: 12 }}
+                    />
+                  )}
+                  <Text className={`font-semibold text-lg ${
+                    isSubmitting 
+                      ? 'text-primary-dark/70' 
+                      : 'text-primary-dark'
+                  }`}>
+                    {isSubmitting 
+                      ? (editingService ? 'Modification...' : 'Ajout...')
+                      : (editingService ? 'Modifier le service' : 'Ajouter le service')
+                    }
                   </Text>
                 </TouchableOpacity>
               </View>

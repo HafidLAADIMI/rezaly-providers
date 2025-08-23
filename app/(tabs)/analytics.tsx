@@ -336,7 +336,7 @@ export default function AnalyticsScreen() {
         )}
       </View>
 
-      <View className="px-6 mb-8">
+      {/* <View className="px-6 mb-8">
         <Text className="text-xl font-semibold text-text-primary mb-4">Conseils d'amélioration</Text>
         <View className="bg-primary-beige/10 border border-primary-beige/30 rounded-xl p-4">
           <View className="flex-row items-start">
@@ -357,7 +357,7 @@ export default function AnalyticsScreen() {
             </View>
           </View>
         </View>
-      </View>
+      </View> */}
 
       {(!stats || stats.totalAppointments === 0) && (
         <View className="px-6 mb-8">

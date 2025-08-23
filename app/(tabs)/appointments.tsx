@@ -1,4 +1,4 @@
-// app/(tabs)/appointments.tsx - PROVIDER VERSION
+// app/(tabs)/appointments.tsx - FIXED VERSION WITH BETTER DEBUGGING
 import { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
@@ -17,6 +17,7 @@ import { useAuth } from '../../contexts/AuthContext';
 import { appointmentService } from '../../services/appointmentService';
 import { serviceService } from '../../services/serviceService';
 import { Appointment, AppointmentStatus, Service } from '../../types';
+import { useFocusEffect } from '@react-navigation/native';
 
 interface AppointmentWithServices extends Appointment {
   serviceDetails?: Service[];
@@ -31,17 +32,32 @@ export default function ProviderAppointmentsScreen() {
   const [showNoteModal, setShowNoteModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [noteText, setNoteText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // ENHANCED: Load appointments when screen focuses (important for real-time updates)
+  useFocusEffect(
+    useCallback(() => {
+      console.log('AppointmentScreen: Screen focused, reloading appointments');
+      if (user?.salonId) {
+        loadAppointments();
+      }
+    }, [user?.salonId])
+  );
 
   useEffect(() => {
     if (user?.salonId) {
       loadAppointments();
+    } else {
+      console.log('AppointmentScreen: No salonId available');
+      setIsLoading(false);
     }
   }, [user?.salonId]);
 
-  // FIXED: Enhanced appointment loading with service details
+  // ENHANCED: Appointment loading with better error handling and logging
   const loadAppointments = useCallback(async (isRefreshing = false) => {
     if (!user?.salonId) {
-      console.log('No salon ID available');
+      console.log('AppointmentScreen: No salon ID available');
+      setIsLoading(false);
       return;
     }
 
@@ -50,23 +66,45 @@ export default function ProviderAppointmentsScreen() {
         setIsLoading(true);
       }
 
-      console.log('Loading appointments for salon:', user.salonId);
+      console.log('AppointmentScreen: Loading appointments for salon:', user.salonId);
 
       const appointmentsData = await appointmentService.getSalonAppointments(user.salonId);
-      console.log('Loaded appointments:', appointmentsData.length);
+      console.log('AppointmentScreen: Raw appointments loaded:', appointmentsData.length);
+      
+      // Log each appointment for debugging
+      appointmentsData.forEach((apt, index) => {
+        console.log(`Appointment ${index + 1}:`, {
+          id: apt.id,
+          clientName: apt.clientName,
+          date: apt.appointmentDate,
+          time: apt.timeSlot,
+          status: apt.status,
+          services: apt.services?.length || 0
+        });
+      });
+
+      if (appointmentsData.length === 0) {
+        console.log('AppointmentScreen: No appointments found for salon');
+        setAppointments([]);
+        return;
+      }
 
       // Load service details for each appointment
+      console.log('AppointmentScreen: Loading service details...');
       const appointmentsWithServices = await Promise.allSettled(
         appointmentsData.map(async (appointment) => {
           try {
             if (!appointment.services || appointment.services.length === 0) {
+              console.log(`Appointment ${appointment.id}: No services`);
               return { ...appointment, serviceDetails: [] };
             }
 
+            console.log(`Appointment ${appointment.id}: Loading ${appointment.services.length} services`);
             const services = await serviceService.getServicesByIds(appointment.services);
+            console.log(`Appointment ${appointment.id}: Loaded ${services.length} service details`);
             return { ...appointment, serviceDetails: services };
           } catch (error) {
-            console.error('Error loading services for appointment:', appointment.id, error);
+            console.error(`Error loading services for appointment ${appointment.id}:`, error);
             return { ...appointment, serviceDetails: [] };
           }
         })
@@ -79,18 +117,24 @@ export default function ProviderAppointmentsScreen() {
         )
         .map(result => result.value);
 
-      // Sort by date and time
+      // Sort by date and time (most recent first for pending, oldest first for confirmed)
       const sortedAppointments = successfulAppointments.sort((a, b) => {
         const dateA = new Date(a.appointmentDate + 'T' + a.timeSlot);
         const dateB = new Date(b.appointmentDate + 'T' + b.timeSlot);
+        
+        // For pending appointments, show newest first
+        if (a.status === 'pending' || b.status === 'pending') {
+          return dateB.getTime() - dateA.getTime();
+        }
+        // For others, show chronologically
         return dateA.getTime() - dateB.getTime();
       });
 
+      console.log('AppointmentScreen: Final processed appointments:', sortedAppointments.length);
       setAppointments(sortedAppointments);
-      console.log('Appointments processed successfully');
 
     } catch (error) {
-      console.error('Error loading appointments:', error);
+      console.error('AppointmentScreen: Error loading appointments:', error);
       Alert.alert('Erreur', 'Impossible de charger les rendez-vous');
     } finally {
       if (!isRefreshing) {
@@ -100,13 +144,16 @@ export default function ProviderAppointmentsScreen() {
   }, [user?.salonId]);
 
   const onRefresh = async () => {
+    console.log('AppointmentScreen: Manual refresh triggered');
     setRefreshing(true);
     await loadAppointments(true);
     setRefreshing(false);
   };
 
-  // FIXED: Enhanced appointment status update
+  // ENHANCED: Appointment status update with loading states
   const handleConfirmAppointment = (appointment: Appointment) => {
+    if (isSubmitting) return;
+    
     Alert.alert(
       'Confirmer le rendez-vous',
       `Confirmer le rendez-vous de ${appointment.clientName} pour le ${appointment.appointmentDate} à ${appointment.timeSlot} ?`,
@@ -121,29 +168,40 @@ export default function ProviderAppointmentsScreen() {
   };
 
   const confirmAppointment = async (appointmentId: string) => {
+    if (isSubmitting) return;
+    
     try {
+      setIsSubmitting(true);
+      console.log('AppointmentScreen: Confirming appointment:', appointmentId);
+      
       const result = await appointmentService.confirmAppointment(appointmentId, '');
       
       if (result.success) {
+        console.log('AppointmentScreen: Appointment confirmed successfully');
         Alert.alert('Succès', 'Rendez-vous confirmé avec succès');
         await loadAppointments();
       } else {
+        console.error('AppointmentScreen: Failed to confirm appointment:', result.error);
         Alert.alert('Erreur', result.error || 'Impossible de confirmer le rendez-vous');
       }
     } catch (error) {
-      console.error('Error confirming appointment:', error);
+      console.error('AppointmentScreen: Error confirming appointment:', error);
       Alert.alert('Erreur', 'Une erreur est survenue');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleRejectAppointment = (appointment: Appointment) => {
+    if (isSubmitting) return;
+    
     setSelectedAppointment(appointment);
     setNoteText('');
     setShowNoteModal(true);
   };
 
   const rejectAppointment = async () => {
-    if (!selectedAppointment) return;
+    if (!selectedAppointment || isSubmitting) return;
 
     if (!noteText.trim()) {
       Alert.alert('Erreur', 'Veuillez indiquer une raison pour le refus');
@@ -151,27 +209,36 @@ export default function ProviderAppointmentsScreen() {
     }
 
     try {
+      setIsSubmitting(true);
+      console.log('AppointmentScreen: Rejecting appointment:', selectedAppointment.id);
+      
       const result = await appointmentService.rejectAppointment(
         selectedAppointment.id, 
         noteText.trim()
       );
       
       if (result.success) {
+        console.log('AppointmentScreen: Appointment rejected successfully');
         Alert.alert('Rendez-vous refusé', 'Le client sera notifié du refus');
         setShowNoteModal(false);
         setSelectedAppointment(null);
         setNoteText('');
         await loadAppointments();
       } else {
+        console.error('AppointmentScreen: Failed to reject appointment:', result.error);
         Alert.alert('Erreur', result.error || 'Impossible de refuser le rendez-vous');
       }
     } catch (error) {
-      console.error('Error rejecting appointment:', error);
+      console.error('AppointmentScreen: Error rejecting appointment:', error);
       Alert.alert('Erreur', 'Une erreur est survenue');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleCompleteAppointment = (appointment: Appointment) => {
+    if (isSubmitting) return;
+    
     Alert.alert(
       'Marquer comme terminé',
       `Marquer le rendez-vous de ${appointment.clientName} comme terminé ?`,
@@ -186,22 +253,31 @@ export default function ProviderAppointmentsScreen() {
   };
 
   const completeAppointment = async (appointmentId: string) => {
+    if (isSubmitting) return;
+    
     try {
+      setIsSubmitting(true);
+      console.log('AppointmentScreen: Completing appointment:', appointmentId);
+      
       const result = await appointmentService.updateAppointmentStatus(appointmentId, 'completed');
       
       if (result.success) {
+        console.log('AppointmentScreen: Appointment completed successfully');
         Alert.alert('Succès', 'Rendez-vous marqué comme terminé');
         await loadAppointments();
       } else {
+        console.error('AppointmentScreen: Failed to complete appointment:', result.error);
         Alert.alert('Erreur', result.error || 'Impossible de terminer le rendez-vous');
       }
     } catch (error) {
-      console.error('Error completing appointment:', error);
+      console.error('AppointmentScreen: Error completing appointment:', error);
       Alert.alert('Erreur', 'Une erreur est survenue');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
-  // FIXED: Enhanced date formatting
+  // Enhanced date formatting
   const formatDate = (dateString: string) => {
     try {
       const date = new Date(dateString + 'T00:00:00');
@@ -220,16 +296,13 @@ export default function ProviderAppointmentsScreen() {
 
   // Filter appointments based on active tab
   const filteredAppointments = appointments.filter(apt => {
-    const today = new Date().toISOString().split('T')[0];
-    const aptDate = apt.appointmentDate;
-
     switch (activeTab) {
       case 'pending':
         return apt.status === 'pending';
       case 'confirmed':
         return apt.status === 'confirmed';
       case 'history':
-        return apt.status === 'completed' || apt.status === 'cancelled' || apt.status === 'rejected';
+        return ['completed', 'cancelled', 'rejected'].includes(apt.status);
       default:
         return false;
     }
@@ -298,7 +371,7 @@ export default function ProviderAppointmentsScreen() {
             <Text className="text-text-primary/70 text-sm mb-1">Services:</Text>
             {appointment.serviceDetails.map((service) => (
               <Text key={service.id} className="text-text-primary text-sm">
-                • {service.name}
+                • {service.name} ({service.price} DH - {service.duration} min)
               </Text>
             ))}
           </View>
@@ -311,19 +384,27 @@ export default function ProviderAppointmentsScreen() {
           </View>
         )}
 
-        {/* Action Buttons */}
+        {/* Action Buttons with Loading States */}
         {appointment.status === 'pending' && (
           <View className="flex-row gap-2 mt-3">
             <TouchableOpacity
               onPress={() => handleConfirmAppointment(appointment)}
               className="flex-1 bg-green-500/20 py-2 rounded-lg flex-row items-center justify-center"
+              disabled={isSubmitting}
             >
-              <MaterialIcons name="check" size={16} color="#10B981" />
-              <Text className="text-green-500 font-medium ml-1 text-sm">Confirmer</Text>
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#10B981" />
+              ) : (
+                <>
+                  <MaterialIcons name="check" size={16} color="#10B981" />
+                  <Text className="text-green-500 font-medium ml-1 text-sm">Confirmer</Text>
+                </>
+              )}
             </TouchableOpacity>
             <TouchableOpacity
               onPress={() => handleRejectAppointment(appointment)}
               className="flex-1 bg-red-500/20 py-2 rounded-lg flex-row items-center justify-center"
+              disabled={isSubmitting}
             >
               <MaterialIcons name="close" size={16} color="#EF4444" />
               <Text className="text-red-500 font-medium ml-1 text-sm">Refuser</Text>
@@ -336,9 +417,16 @@ export default function ProviderAppointmentsScreen() {
             <TouchableOpacity
               onPress={() => handleCompleteAppointment(appointment)}
               className="flex-1 bg-blue-500/20 py-2 rounded-lg flex-row items-center justify-center"
+              disabled={isSubmitting}
             >
-              <MaterialIcons name="done" size={16} color="#3B82F6" />
-              <Text className="text-blue-500 font-medium ml-1 text-sm">Marquer terminé</Text>
+              {isSubmitting ? (
+                <ActivityIndicator size="small" color="#3B82F6" />
+              ) : (
+                <>
+                  <MaterialIcons name="done" size={16} color="#3B82F6" />
+                  <Text className="text-blue-500 font-medium ml-1 text-sm">Marquer terminé</Text>
+                </>
+              )}
             </TouchableOpacity>
           </View>
         )}
@@ -353,10 +441,13 @@ export default function ProviderAppointmentsScreen() {
             </Text>
           </View>
         )}
+
+        
       </View>
     );
   };
 
+  // Show loading screen
   if (isLoading) {
     return (
       <View className="flex-1 bg-primary-dark items-center justify-center">
@@ -366,12 +457,26 @@ export default function ProviderAppointmentsScreen() {
     );
   }
 
+  // Show no salon message
+  if (!user?.salonId) {
+    return (
+      <View className="flex-1 bg-primary-dark items-center justify-center px-6">
+        <MaterialIcons name="store" size={64} color="#D4B896" />
+        <Text className="text-text-primary text-xl font-bold mt-4 text-center">
+          Aucun salon configuré
+        </Text>
+        <Text className="text-text-primary/70 text-center mt-2">
+          Vous devez d'abord créer votre salon pour voir les rendez-vous
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <View className="flex-1 bg-primary-dark">
       {/* Header */}
       <View className="px-6 pt-16 pb-6">
         <Text className="text-3xl font-bold text-text-primary mb-6">Rendez-vous</Text>
-
         {/* Tabs */}
         <View className="flex-row bg-primary-light/10 rounded-xl p-1">
           {[
@@ -451,10 +556,13 @@ export default function ProviderAppointmentsScreen() {
               </Text>
               <TouchableOpacity
                 onPress={() => {
-                  setShowNoteModal(false);
-                  setSelectedAppointment(null);
-                  setNoteText('');
+                  if (!isSubmitting) {
+                    setShowNoteModal(false);
+                    setSelectedAppointment(null);
+                    setNoteText('');
+                  }
                 }}
+                disabled={isSubmitting}
               >
                 <MaterialIcons name="close" size={24} color="#D4B896" />
               </TouchableOpacity>
@@ -488,6 +596,7 @@ export default function ProviderAppointmentsScreen() {
                   multiline
                   numberOfLines={4}
                   style={{ minHeight: 100 }}
+                  editable={!isSubmitting}
                 />
               </View>
             </View>
@@ -495,24 +604,30 @@ export default function ProviderAppointmentsScreen() {
             <View className="flex-row gap-3">
               <TouchableOpacity
                 onPress={() => {
-                  setShowNoteModal(false);
-                  setSelectedAppointment(null);
-                  setNoteText('');
+                  if (!isSubmitting) {
+                    setShowNoteModal(false);
+                    setSelectedAppointment(null);
+                    setNoteText('');
+                  }
                 }}
                 className="flex-1 bg-primary-light/10 border border-primary-beige/30 rounded-xl py-4"
+                disabled={isSubmitting}
               >
                 <Text className="text-text-primary text-center font-semibold">Annuler</Text>
               </TouchableOpacity>
               
               <TouchableOpacity
                 onPress={rejectAppointment}
-                disabled={!noteText.trim()}
-                className={`flex-1 rounded-xl py-4 ${
-                  noteText.trim() ? 'bg-red-500' : 'bg-red-500/50'
+                disabled={!noteText.trim() || isSubmitting}
+                className={`flex-1 rounded-xl py-4 flex-row items-center justify-center ${
+                  (!noteText.trim() || isSubmitting) ? 'bg-red-500/50' : 'bg-red-500'
                 }`}
               >
-                <Text className="text-white text-center font-semibold">
-                  Refuser le rendez-vous
+                {isSubmitting && (
+                  <ActivityIndicator size="small" color="white" style={{ marginRight: 8 }} />
+                )}
+                <Text className="text-white font-semibold">
+                  {isSubmitting ? 'Refus...' : 'Refuser le rendez-vous'}
                 </Text>
               </TouchableOpacity>
             </View>

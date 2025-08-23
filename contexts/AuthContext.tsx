@@ -1,8 +1,7 @@
-// contexts/AuthContext.tsx - Updated Provider Version with Notifications
+// contexts/AuthContext.tsx - Improved version with better persistence
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { User } from '../types';
 import { authService } from '../services/authService';
-import { notificationService } from '../services/notificationService';
+import { User } from '../types';
 
 interface AuthContextType {
   user: User | null;
@@ -11,167 +10,157 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   signUp: (userData: any) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-export function AuthProvider({ children }: { children: ReactNode }) {
+interface AuthProviderProps {
+  children: ReactNode;
+}
+
+export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true); // Start with true to show loading initially
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
-    let mounted = true;
+    console.log('AuthProvider: Setting up auth state listener');
     
-    const unsubscribe = authService.onAuthStateChanged(async (userData) => {
-      console.log('Auth state changed:', userData?.email || 'No user');
+    // Set up the Firebase auth state listener
+    const unsubscribe = authService.onAuthStateChanged((userData) => {
+      console.log('AuthProvider: Auth state changed:', userData?.email || 'No user');
       
-      if (mounted) {
-        setUser(userData);
+      // Update user state
+      setUser(userData);
+      
+      // Mark as initialized on first auth state change
+      if (!isInitialized) {
         setIsInitialized(true);
-
-        // Setup notifications for authenticated salon owners
-        if (userData && userData.role === 'salon_owner') {
-          try {
-            console.log('Setting up notifications for salon owner:', userData.email);
-            
-            // Request permissions
-            const hasPermissions = await notificationService.requestPermissions();
-            if (hasPermissions) {
-              console.log('Notification permissions granted');
-              
-              // Get and save push token to user profile
-              await notificationService.savePushToken(userData.id);
-              console.log('Push token saved for salon owner');
-            } else {
-              console.log('Notification permissions denied');
-            }
-          } catch (error) {
-            console.log('Notification setup failed:', error);
-          }
-        } else if (userData) {
-          console.log('User is not a salon owner, skipping notification setup');
-        }
+        console.log('AuthProvider: Auth initialized');
       }
+      
+      // Stop loading once we get the first auth state
+      setIsLoading(false);
     });
 
+    // Cleanup function
     return () => {
-      mounted = false;
+      console.log('AuthProvider: Cleaning up auth listener');
       unsubscribe();
     };
-  }, []);
+  }, []); // Remove isInitialized dependency to avoid re-creating listener
 
   const signIn = async (email: string, password: string) => {
-    setIsLoading(true);
-    console.log('Attempting sign in for:', email);
-    
     try {
+      setIsLoading(true);
+      console.log('AuthProvider: Attempting sign in for:', email);
+      
       const result = await authService.signIn(email, password);
-      console.log('Sign in result:', result.success ? 'Success' : `Failed: ${result.error}`);
       
       if (result.success && result.data) {
-        setUser(result.data);
-        
-        // Setup notifications immediately after successful sign in for salon owners
-        if (result.data.role === 'salon_owner') {
-          try {
-            console.log('Setting up notifications after sign in');
-            const hasPermissions = await notificationService.requestPermissions();
-            if (hasPermissions) {
-              await notificationService.savePushToken(result.data.id);
-            }
-          } catch (error) {
-            console.log('Post-signin notification setup failed:', error);
-          }
-        }
-        
+        console.log('AuthProvider: Sign in successful');
+        // Don't manually setUser here - let the auth state listener handle it
         return { success: true };
+      } else {
+        console.error('AuthProvider: Sign in failed:', result.error);
+        setIsLoading(false); // Stop loading on error
+        return { success: false, error: result.error };
       }
-      
-      return {
-        success: false,
-        error: result.error || 'Échec de la connexion'
-      };
     } catch (error: any) {
-      console.error('Sign in error:', error);
-      return {
-        success: false,
-        error: 'Erreur de connexion. Vérifiez votre connexion internet.'
-      };
-    } finally {
+      console.error('AuthProvider signIn error:', error);
       setIsLoading(false);
+      return { success: false, error: 'Erreur de connexion' };
     }
+    // Don't set loading to false here - auth listener will handle it
   };
 
   const signUp = async (userData: any) => {
-    setIsLoading(true);
-    console.log('Attempting sign up for:', userData.email);
-    
     try {
+      setIsLoading(true);
+      console.log('AuthProvider: Attempting sign up for:', userData.email);
+      
       const result = await authService.signUp(userData);
-      console.log('Sign up result:', result.success ? 'Success' : `Failed: ${result.error}`);
       
       if (result.success && result.data) {
-        setUser(result.data);
-        
-        // Setup notifications immediately after successful sign up for salon owners
-        if (result.data.role === 'salon_owner') {
-          try {
-            console.log('Setting up notifications after sign up');
-            const hasPermissions = await notificationService.requestPermissions();
-            if (hasPermissions) {
-              await notificationService.savePushToken(result.data.id);
-            }
-          } catch (error) {
-            console.log('Post-signup notification setup failed:', error);
-          }
-        }
-        
+        console.log('AuthProvider: Sign up successful');
+        // Don't manually setUser here - let the auth state listener handle it
         return { success: true };
+      } else {
+        console.error('AuthProvider: Sign up failed:', result.error);
+        setIsLoading(false);
+        return { success: false, error: result.error };
       }
-      
-      return {
-        success: false,
-        error: result.error || 'Échec de la création du compte'
-      };
     } catch (error: any) {
-      console.error('Sign up error:', error);
-      return {
-        success: false,
-        error: 'Erreur lors de la création du compte.'
-      };
-    } finally {
+      console.error('AuthProvider signUp error:', error);
       setIsLoading(false);
+      return { success: false, error: 'Erreur lors de l\'inscription' };
     }
   };
 
   const signOut = async () => {
-    setIsLoading(true);
     try {
+      setIsLoading(true);
+      console.log('AuthProvider: Signing out user');
+      
       await authService.signOut();
-      setUser(null);
+      // Don't manually setUser(null) here - auth listener will handle it
+      
+      console.log('AuthProvider: Sign out successful');
     } catch (error) {
-      console.error('Sign out error:', error);
-    } finally {
+      console.error('AuthProvider signOut error:', error);
       setIsLoading(false);
     }
   };
 
-  return (
-    <AuthContext.Provider value={{
-      user,
+  const refreshUser = async () => {
+    try {
+      console.log('AuthProvider: Refreshing user data');
+      
+      if (user?.id) {
+        const userData = await authService.getUserData(user.id);
+        if (userData) {
+          console.log('AuthProvider: User data refreshed successfully');
+          setUser(userData);
+        } else {
+          console.log('AuthProvider: No user data found during refresh');
+        }
+      } else {
+        console.log('AuthProvider: No user ID available for refresh');
+      }
+    } catch (error) {
+      console.error('AuthProvider refreshUser error:', error);
+    }
+  };
+
+  const value: AuthContextType = {
+    user,
+    isLoading,
+    isInitialized,
+    signIn,
+    signUp,
+    signOut,
+    refreshUser,
+  };
+
+  // Debug logging for state changes
+  useEffect(() => {
+    console.log('AuthProvider state:', {
+      hasUser: !!user,
+      userEmail: user?.email,
       isLoading,
-      isInitialized,
-      signIn,
-      signUp,
-      signOut
-    }}>
+      isInitialized
+    });
+  }, [user, isLoading, isInitialized]);
+
+  return (
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
 }
 
-export function useAuth() {
+export function useAuth(): AuthContextType {
   const context = useContext(AuthContext);
   if (context === undefined) {
     throw new Error('useAuth must be used within an AuthProvider');

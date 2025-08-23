@@ -81,9 +81,7 @@ export default function PersonalInfoScreen() {
               {user?.name?.charAt(0).toUpperCase() || 'U'}
             </Text>
           </View>
-          <TouchableOpacity className="bg-primary-light/10 border border-primary-beige/30 rounded-lg px-4 py-2">
-            <Text className="text-text-primary/70 text-sm">Changer la photo</Text>
-          </TouchableOpacity>
+
         </View>
 
         {/* Form Fields */}
@@ -168,30 +166,7 @@ export default function PersonalInfoScreen() {
               </TouchableOpacity>
             </View>
           )}
-        </View>
-
-        {/* Account Actions */}
-        {/* {!isEditing && (
-          <View className="mt-8 space-y-3">
-            <TouchableOpacity className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 flex-row items-center">
-              <MaterialIcons name="lock" size={24} color="#D4B896" />
-              <View className="flex-1 ml-4">
-                <Text className="text-text-primary font-medium">Changer le mot de passe</Text>
-                <Text className="text-text-primary/70 text-sm">Modifier votre mot de passe</Text>
-              </View>
-              <MaterialIcons name="chevron-right" size={20} color="#D4B896" />
-            </TouchableOpacity>
-
-            <TouchableOpacity className="bg-primary-light/10 border border-primary-beige/30 rounded-xl p-4 flex-row items-center">
-              <MaterialIcons name="notifications" size={24} color="#D4B896" />
-              <View className="flex-1 ml-4">
-                <Text className="text-text-primary font-medium">Préférences de notification</Text>
-                <Text className="text-text-primary/70 text-sm">Gérer vos notifications</Text>
-              </View>
-              <MaterialIcons name="chevron-right" size={20} color="#D4B896" />
-            </TouchableOpacity>
-          </View>
-        )} */}
+        </View>    
 
         <View className="h-20" />
       </ScrollView>

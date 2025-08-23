@@ -1,4 +1,4 @@
-// services/authService.ts
+// services/authService.ts - Fixed version
 import { 
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
@@ -56,7 +56,7 @@ class AuthService {
     }
   }
 
-  // Sign up user
+  // Sign up user - FIXED with proper error handling
   async signUp(userData: SignUpData): Promise<ServiceResponse<User>> {
     try {
       const { email, password, name, phone, role } = userData;
@@ -64,6 +64,11 @@ class AuthService {
       console.log('Creating user account for:', email);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const firebaseUser = userCredential.user;
+
+      // Check if firebaseUser exists before accessing properties
+      if (!firebaseUser) {
+        throw new Error('Failed to create user account');
+      }
 
       console.log('Firebase user created, updating profile...');
       await updateProfile(firebaseUser, { displayName: name });
@@ -74,7 +79,9 @@ class AuthService {
         name,
         phone,
         role,
-        isVerified: false,
+        // Salon owners need account verification first
+        isVerified: role === 'client' ? true : false,
+        accountVerificationStatus: role === 'salon_owner' ? 'pending' : 'verified',
         createdAt: new Date(),
         updatedAt: new Date()
       };
@@ -94,7 +101,7 @@ class AuthService {
     }
   }
 
-  // Sign up salon owner with documents
+  // Sign up salon owner with documents - FIXED
   async signUpSalonOwner(userData: SalonOwnerSignUpData): Promise<ServiceResponse<SalonOwner>> {
     try {
       const { businessLicense, idDocument, ...baseData } = userData;
@@ -108,14 +115,17 @@ class AuthService {
         ...result.data,
         businessLicense,
         idDocument,
-        verificationStatus: 'pending',
+        // Account verification for salon owner
+        accountVerificationStatus: 'pending',
+        isVerified: false,
         verificationDocuments: [businessLicense, idDocument]
       };
 
       await updateDoc(doc(db, 'users', result.data.id), {
         businessLicense,
         idDocument,
-        verificationStatus: 'pending',
+        accountVerificationStatus: 'pending',
+        isVerified: false,
         verificationDocuments: [businessLicense, idDocument]
       });
 
@@ -129,11 +139,16 @@ class AuthService {
     }
   }
 
-  // Sign in
+  // Sign in - FIXED with better error handling
   async signIn(email: string, password: string): Promise<ServiceResponse<User>> {
     try {
       console.log('Attempting Firebase sign in for:', email);
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
+      
+      // Check if user exists
+      if (!userCredential.user) {
+        return { success: false, error: 'Échec de la connexion.' };
+      }
       
       console.log('Firebase sign in successful, fetching user data...');
       const userData = await this.getUserData(userCredential.user.uid);
@@ -172,14 +187,36 @@ class AuthService {
     }
   }
 
-  // Get user data from Firestore
+  // Get user data from Firestore - ENHANCED with better error handling
   async getUserData(uid: string): Promise<User | null> {
     try {
       console.log('Fetching user data for UID:', uid);
       const userDoc = await getDoc(doc(db, 'users', uid));
       if (userDoc.exists()) {
         console.log('User data found in Firestore');
-        return { id: userDoc.id, ...userDoc.data() } as User;
+        const data = userDoc.data();
+        
+        // For backward compatibility - check if user is salon owner
+        const isSalonOwner = data.role === 'salon_owner';
+        
+        const userData = { 
+          id: userDoc.id, 
+          ...data,
+          // Ensure verification fields exist
+          accountVerificationStatus: data.accountVerificationStatus || 
+            (isSalonOwner ? 'pending' : 'verified'),
+          isVerified: data.isVerified !== undefined ? data.isVerified : 
+            (!isSalonOwner) // Clients are always verified
+        } as User;
+        
+        console.log('User data with verification:', {
+          email: userData.email,
+          role: userData.role,
+          accountVerificationStatus: userData.accountVerificationStatus,
+          isVerified: userData.isVerified
+        });
+        
+        return userData;
       }
       console.log('No user data found in Firestore');
       return null;
@@ -189,15 +226,21 @@ class AuthService {
     }
   }
 
-  // Listen to auth state changes
+  // Listen to auth state changes - FIXED with null checks
   onAuthStateChanged(callback: (user: User | null) => void) {
     return onAuthStateChanged(auth, async (firebaseUser: FirebaseUser | null) => {
       console.log('Auth state changed:', firebaseUser?.email || 'No user');
       
-      if (firebaseUser) {
-        const userData = await this.getUserData(firebaseUser.uid);
-        this.currentUser = userData;
-        callback(userData);
+      if (firebaseUser && firebaseUser.uid) {
+        try {
+          const userData = await this.getUserData(firebaseUser.uid);
+          this.currentUser = userData;
+          callback(userData);
+        } catch (error) {
+          console.error('Error in auth state change:', error);
+          this.currentUser = null;
+          callback(null);
+        }
       } else {
         this.currentUser = null;
         callback(null);
@@ -210,7 +253,7 @@ class AuthService {
     return this.currentUser;
   }
 
-  // Update user profile
+  // Update user profile - FIXED
   async updateProfile(updates: Partial<User>): Promise<ServiceResponse<void>> {
     try {
       if (!this.currentUser) {
@@ -225,11 +268,20 @@ class AuthService {
       this.currentUser = { ...this.currentUser, ...updates };
       return { success: true };
     } catch (error: any) {
+      console.error('Update profile error:', error);
       return { 
         success: false, 
         error: this.getErrorMessage(error)
       };
     }
+  }
+
+  // Check if salon owner account is verified
+  isAccountVerified(): boolean {
+    if (!this.currentUser) return false;
+    if (this.currentUser.role === 'client') return true;
+    return this.currentUser.accountVerificationStatus === 'verified' || 
+           this.currentUser.isVerified === true;
   }
 }
 

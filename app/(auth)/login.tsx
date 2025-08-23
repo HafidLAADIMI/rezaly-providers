@@ -171,17 +171,6 @@ export default function LoginScreen() {
               </Text>
             </View>
           )}
-
-          {/* Test Account Info */}
-          <View className="mt-4 p-3 bg-primary-beige/10 rounded-xl">
-            <Text className="text-primary-beige text-sm text-center font-medium mb-1">
-              🎉 Connexion réussie!
-            </Text>
-            <Text className="text-text-primary/70 text-xs text-center">
-              Votre compte "{user?.name || 'hafido'}" est connecté
-            </Text>
-          </View>
-
           {/* Register Links */}
           <View className="mt-8 space-y-4">
             {/* <TouchableOpacity 

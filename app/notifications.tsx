@@ -203,7 +203,7 @@ export default function ProviderNotificationsScreen(): JSX.Element {
 
   const ListHeader = () => (
     <View className="px-6 py-4 mb-4">
-      <View className="flex-row justify-between items-center mb-4">
+      <View className="flex-row justify-between items-center my-6  ">
         <View className="flex-row items-center">
           <TouchableOpacity
             onPress={() => router.back()}
