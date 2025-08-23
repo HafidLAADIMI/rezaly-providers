@@ -1,4 +1,4 @@
-// contexts/AuthContext.tsx - Improved version with better persistence
+// contexts/AuthContext.tsx - Salon Owner App - Only persist salon owners
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { authService } from '../services/authService';
 import { User } from '../types';
@@ -21,18 +21,31 @@ interface AuthProviderProps {
 
 export function AuthProvider({ children }: AuthProviderProps) {
   const [user, setUser] = useState<User | null>(null);
-  const [isLoading, setIsLoading] = useState(true); // Start with true to show loading initially
+  const [isLoading, setIsLoading] = useState(true);
   const [isInitialized, setIsInitialized] = useState(false);
 
   useEffect(() => {
     console.log('AuthProvider: Setting up auth state listener');
     
     // Set up the Firebase auth state listener
-    const unsubscribe = authService.onAuthStateChanged((userData) => {
-      console.log('AuthProvider: Auth state changed:', userData?.email || 'No user');
+    const unsubscribe = authService.onAuthStateChanged(async (userData) => {
+      console.log('AuthProvider: Auth state changed:', userData?.email || 'No user', 'Role:', userData?.role);
       
-      // Update user state
-      setUser(userData);
+      // SALON OWNER APP: Only allow salon owners to persist
+      if (userData) {
+        if (userData.role === 'salon_owner') {
+          console.log('AuthProvider: Salon owner authenticated - allowing session');
+          setUser(userData);
+        } else {
+          console.log('AuthProvider: Non-salon owner detected - signing out automatically');
+          // Automatically sign out users who aren't salon owners
+          await authService.signOut();
+          setUser(null);
+        }
+      } else {
+        console.log('AuthProvider: No user authenticated');
+        setUser(null);
+      }
       
       // Mark as initialized on first auth state change
       if (!isInitialized) {
@@ -49,7 +62,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       console.log('AuthProvider: Cleaning up auth listener');
       unsubscribe();
     };
-  }, []); // Remove isInitialized dependency to avoid re-creating listener
+  }, [isInitialized]);
 
   const signIn = async (email: string, password: string) => {
     try {
@@ -59,12 +72,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
       const result = await authService.signIn(email, password);
       
       if (result.success && result.data) {
-        console.log('AuthProvider: Sign in successful');
+        console.log('AuthProvider: Sign in successful, checking role...');
+        
+        // Check if user is a salon owner
+        if (result.data.role !== 'salon_owner') {
+          console.log('AuthProvider: User is not a salon owner, signing out');
+          await authService.signOut();
+          setIsLoading(false);
+          return { 
+            success: false, 
+            error: 'Cette application est réservée aux propriétaires de salon. Veuillez utiliser l\'application client.' 
+          };
+        }
+        
+        console.log('AuthProvider: Salon owner sign in successful');
         // Don't manually setUser here - let the auth state listener handle it
         return { success: true };
       } else {
         console.error('AuthProvider: Sign in failed:', result.error);
-        setIsLoading(false); // Stop loading on error
+        setIsLoading(false);
         return { success: false, error: result.error };
       }
     } catch (error: any) {
@@ -72,13 +98,21 @@ export function AuthProvider({ children }: AuthProviderProps) {
       setIsLoading(false);
       return { success: false, error: 'Erreur de connexion' };
     }
-    // Don't set loading to false here - auth listener will handle it
   };
 
   const signUp = async (userData: any) => {
     try {
       setIsLoading(true);
       console.log('AuthProvider: Attempting sign up for:', userData.email);
+      
+      // Ensure we're only allowing salon owner signups
+      if (userData.role !== 'salon_owner') {
+        setIsLoading(false);
+        return { 
+          success: false, 
+          error: 'Cette application est réservée aux propriétaires de salon.' 
+        };
+      }
       
       const result = await authService.signUp(userData);
       
@@ -120,8 +154,14 @@ export function AuthProvider({ children }: AuthProviderProps) {
       if (user?.id) {
         const userData = await authService.getUserData(user.id);
         if (userData) {
-          console.log('AuthProvider: User data refreshed successfully');
-          setUser(userData);
+          // Double-check role after refresh
+          if (userData.role === 'salon_owner') {
+            console.log('AuthProvider: User data refreshed successfully');
+            setUser(userData);
+          } else {
+            console.log('AuthProvider: User role changed to non-salon owner, signing out');
+            await authService.signOut();
+          }
         } else {
           console.log('AuthProvider: No user data found during refresh');
         }
@@ -148,6 +188,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     console.log('AuthProvider state:', {
       hasUser: !!user,
       userEmail: user?.email,
+      userRole: user?.role,
       isLoading,
       isInitialized
     });
